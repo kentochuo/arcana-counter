@@ -481,6 +481,7 @@ class PersonaPlayer:
     G1_STOP_DMG = 2                                    # G1の時、相手のダメージがこの点数以上なら前列に出さない
     G1_BACK_BC = False                                 # G1の時の後列はヴァンガードの後ろ(中央後列)に置く
     BACK_ORDER = ("BL", "BR", "BC")                    # G1/G2の時に後列を埋める順番
+    BC_G2 = True                                       # G3の時、中央後列にチームのG2を置いてアタックさせる(False:G1を置いてヴァンガードをブースト)
     BC_G2_P3 = True                                   # P3/P3P:エリザベスが無い時、中央後列にS.E.E.S.のG2を置いてアタックさせる
     DECK_SAFE = 10                                     # 山札がこの枚数以下なら、G3の【起】1(山札から2体コール)や任意のドローを控える
     GEN_DRAW_MIN = 7                                   # エネルギージェネレーター【起】(ターン1回 EB7で1枚引く)を使うエネルギー量(自分のターン終了前)
@@ -1333,7 +1334,7 @@ class PersonaPlayer:
                 cur = self.circles[spot]
                 p3_bc = (self.series == "P3" and self.BC_G2_P3 and (cur is None or not cur.card.d["extra"].get("elizabeth"))
                          and not any(c.d["extra"].get("elizabeth") for c in self.hand))
-                if spot == "BC" and g >= 3 and (self.series in ("P4", "P5") or p3_bc) and (cur is None or cur.card.grade < 2):
+                if spot == "BC" and g >= 3 and self.BC_G2 and (self.series in ("P4", "P5") or p3_bc) and (cur is None or cur.card.grade < 2):
                     on_board = {u.card.name for u in self.units()}
                     g2 = [c for c in self.hand if c.kind == "unit" and c.grade == 2 and "team" in c.tags
                           and not self.is_g3(c) and c.name not in on_board]
@@ -1822,6 +1823,11 @@ class PersonaPlayer:
                 self.drop.append(u.card); self.circles[k] = None; return True
         return False
 
+    def bc_intercept_ok(self, k, u):
+        """G3の【起】1を使った次の相手ターン終了時まで、中央後列のチーム(P3はS.E.E.S.)のG2はインターセプトできる"""
+        return (k == "BC" and u is not None and self.v_grade >= 3 and self.act1_turn == self.turn and u.card.grade == 2
+                and "team" in u.card.tags and u.card.kind == "unit" and not u.locked and not u.doomed)
+
     def guard_value(self, c, atk):
         """手札のカードをガードに出した時のシールド(コスト込みの判断は呼び出し側)"""
         if c.kind == "trigger":
@@ -1920,6 +1926,8 @@ class PersonaPlayer:
             u = self.circles[k]
             if u and ("kyoryoku" in u.card.tags or "velvet" in u.card.tags and "komyu" in u.card.tags) and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1 and not u.doomed:
                 items.append(("I", k, 5000, 18, 0))
+            elif self.bc_intercept_ok(k, u):
+                items.append(("I", k, 5000, 34 if u.gauge else 22, 0))
         # 最小コストで need 以上のシールドを集める(シールドを5000単位にしたナップサック)
         unit = 5000
         target = -(-need // unit)

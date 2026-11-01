@@ -708,8 +708,10 @@ class HumanPlayer(PersonaPlayer):
         else:
             nmj = {"crit": "クリティカル", "draw": "ドロー", "heal": "ヒール"}[t]
             if t == "crit":
-                sp = self.trigger_target("クリティカルトリガー:パワー+10000とクリティカル+1を与えるユニットを選んでください")
-                give(sp, 10000, 1)
+                sp = self.trigger_target("クリティカルトリガー:クリティカル+1を与えるユニットを選んでください")
+                give(sp, 0, 1)
+                sp = self.trigger_target("クリティカルトリガー:パワー+10000を与えるユニットを選んでください")
+                give(sp, 10000, 0)
             else:
                 sp = self.trigger_target(f"{nmj}トリガー:パワー+10000を与えるユニットを選んでください")
                 give(sp, 10000, 0)
@@ -764,7 +766,8 @@ class HumanPlayer(PersonaPlayer):
             if getattr(self, "no_intercept", False):
                 break
             u = self.circles[k]
-            if u and ("kyoryoku" in u.card.tags or "velvet" in u.card.tags and "komyu" in u.card.tags) and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1 and not u.doomed:
+            if u and (("kyoryoku" in u.card.tags or "velvet" in u.card.tags and "komyu" in u.card.tags) and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1 and not u.doomed
+                      or self.bc_intercept_ok(k, u)):
                 items.append((f"I{k}", k, 5000, 0)); opts.append(dict(id=f"I{k}", label=f"インターセプト(後列):{cname(u.card)}", no=u.card.d["no"], sub="シールド5000"))
         need = atk.power - defense + 1
         info = dict(atk=atk.power, crit=atk.crit, drives=atk.drives, vg=defense, need=need, attacker=("V" if atk.is_v else "R"),
