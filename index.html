@@ -28,6 +28,8 @@
 .side[data-deck="P4"]{--accent:#ffd21f;--accent-ink:#1a1400}
 .side[data-deck="P5"]{--accent:#ff2a2a;--accent-ink:#fff}
 html,body{height:100%}
+*{touch-action:manipulation}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);margin:0;overflow:hidden;
   -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 .app{height:100%;display:flex;flex-direction:column;gap:6px;box-sizing:border-box;
@@ -72,9 +74,9 @@ button:focus-visible,.tile:focus-visible{outline:2px solid var(--accent,#fff);ou
 .pips{display:flex;gap:4px}
 .pip{width:var(--pip,10px);height:var(--pip,10px);transform:rotate(45deg);border:1.5px solid var(--muted);box-sizing:border-box}
 .pip.on{background:var(--accent);border-color:var(--accent)}
-.minus{position:absolute;left:4px;bottom:4px;width:var(--minus,36px);height:var(--minus,36px);border-radius:8px;
-  border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.6);color:#fff;font:700 calc(var(--minus,36px)*.6)/1 var(--body);cursor:pointer;padding:0}
-.minus[disabled]{opacity:.25}
+.minus{position:absolute;right:3px;top:3px;width:var(--minus,34px);height:var(--minus,34px);border-radius:7px;
+  border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.65);color:#fff;font:700 calc(var(--minus,34px)*.62)/1 var(--body);cursor:pointer;padding:0}
+.minus[disabled]{display:none}
 .edit .tile{opacity:.4}
 .edit .tile.sel{opacity:1;border-color:var(--accent)}
 .edit .count,.edit .minus,.edit .pips{display:none}
@@ -192,16 +194,23 @@ function buildSide(p) {
         <span class="num">${a.num || "—"}</span><span class="count">${n}</span>
         <button class="minus" type="button" aria-label="${name}を1減らす" ${n ? "" : "disabled"}>−</button><span class="check">✓</span></div>
       <div class="foot"><span class="name">${name}</span><span class="pips">${[1,2,3].map(i => `<i class="pip${i <= n ? " on" : ""}"></i>`).join("")}</span></div>`;
-    const bump = d => { const c = S.cnt[deck]; c[name] = Math.max(0, Math.min(3, (c[name] || 0) + d)); save(); fill(); };
-    t.onclick = () => {
+    const bump = d => {
+      const c = S.cnt[deck]; const v = Math.max(0, Math.min(3, (c[name] || 0) + d)); c[name] = v; save();
+      t.dataset.n = v; t.querySelector(".count").textContent = v;
+      t.querySelectorAll(".pip").forEach((pp, i) => pp.classList.toggle("on", i < v));
+      t.querySelector(".minus").disabled = !v;
+      t.setAttribute("aria-label", `${name} ${v}。タップで1増やす`);
+    };
+    const tap = () => {
       if (U.editing) {
         const s = S.sel[deck], i = s.indexOf(name);
         if (i >= 0) s.splice(i, 1); else s.push(name);
         S.sel[deck] = D.order.filter(x => s.includes(x)); save(); fill();
       } else bump(1);
     };
-    t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t.onclick(); } else if (!U.editing && (e.key === "-" || e.key === "Backspace")) bump(-1); };
-    t.querySelector(".minus").onclick = e => { e.stopPropagation(); bump(-1); };
+    onTap(t, tap);
+    t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } else if (!U.editing && (e.key === "-" || e.key === "Backspace")) bump(-1); };
+    onTap(t.querySelector(".minus"), () => { if (S.cnt[deck][name]) bump(-1); });
     return t;
   }
   function fill() {
@@ -211,7 +220,7 @@ function buildSide(p) {
     ed.textContent = U.editing ? "完了" : (st.mode === "duel" || $("app").classList.contains("compact") ? "選択" : "表示するアルカナ");
     ed.classList.toggle("on", U.editing);
     if (hint) hint.textContent = U.editing ? `表示するアルカナをタップで選択(${S.sel[S.deck].length}個選択中)`
-      : (list.length ? "タップで＋1(最大3)、左下の「−」で−1" : "「表示するアルカナ」からデッキのアルカナを選んでください");
+      : (list.length ? "タップで＋1(最大3)、右上の「−」で−1" : "「表示するアルカナ」からデッキのアルカナを選んでください");
     el._fit = () => fit(grid, list.length);
     el._fit();
   }
@@ -236,7 +245,7 @@ function fit(g, n) {
   g.style.setProperty("--fs-num", Math.max(12, Math.min(30, s * .17)) + "px");
   g.style.setProperty("--fs-name", Math.max(10, Math.min(16, best.foot * .55)) + "px");
   g.style.setProperty("--pip", Math.max(7, Math.min(12, best.foot * .4)) + "px");
-  g.style.setProperty("--minus", Math.max(24, Math.min(44, s * .26)) + "px");
+  g.style.setProperty("--minus", Math.max(22, Math.min(40, s * .24)) + "px");
 }
 function setCompact() {
   const c = innerHeight < 520 && innerWidth > innerHeight;
@@ -255,6 +264,12 @@ function render() {
   els.forEach(e => e._fill());
 }
 addEventListener("resize", () => { const was = $("app").classList.contains("compact"); setCompact(); if (was !== $("app").classList.contains("compact")) render(); else document.querySelectorAll(".side").forEach(e => e._fit && e._fit()); });
+["gesturestart","gesturechange","dblclick"].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), {passive:false}));
+// タッチ操作はtouchendで直接処理する(iOSのダブルタップ拡大と、続けてタップした時の取りこぼしを防ぐ)
+function onTap(el, fn) {
+  el.addEventListener("touchend", e => { if (e.cancelable) e.preventDefault(); e.stopPropagation(); fn(e); }, {passive:false});
+  el.addEventListener("click", e => { e.stopPropagation(); fn(e); });
+}
 render();
 </script>
 
