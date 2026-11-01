@@ -1,0 +1,90 @@
+{
+ "P4": {
+  "GUARD_TABLE": {
+   "1": 8,
+   "2": 14,
+   "3": 35,
+   "4": 39,
+   "5": 66
+  },
+  "RES": [
+   2,
+   3,
+   4,
+   3
+  ],
+  "KEEP_G3": 1,
+  "USE_ESOUL": true,
+  "SENT_COST": 40,
+  "SENT_SPARE": 8,
+  "PASS5": 1,
+  "DECK_SAFE": 10,
+  "GEN_DRAW_MIN": 7
+ },
+ "P3": {
+  "GUARD_TABLE": {
+   "1": 8,
+   "2": 14,
+   "3": 35,
+   "4": 58,
+   "5": 110
+  },
+  "RES": [
+   2,
+   3,
+   2,
+   4
+  ],
+  "KEEP_G3": 1,
+  "USE_ESOUL": true,
+  "SENT_COST": 52,
+  "SENT_SPARE": 8,
+  "PASS5": 2,
+  "DECK_SAFE": 10,
+  "GEN_DRAW_MIN": 7
+ },
+ "P3P": {
+  "GUARD_TABLE": {
+   "1": 8,
+   "2": 14,
+   "3": 35,
+   "4": 58,
+   "5": 110
+  },
+  "RES": [
+   2,
+   3,
+   2,
+   3
+  ],
+  "KEEP_G3": 1,
+  "USE_ESOUL": true,
+  "SENT_COST": 52,
+  "SENT_SPARE": 8,
+  "PASS5": 2,
+  "DECK_SAFE": 10,
+  "GEN_DRAW_MIN": 7
+ },
+ "P5": {
+  "GUARD_TABLE": {
+   "1": 8,
+   "2": 14,
+   "3": 35,
+   "4": 39,
+   "5": 110
+  },
+  "RES": [
+   2,
+   3,
+   2,
+   2
+  ],
+  "KEEP_G3": 1,
+  "USE_ESOUL": true,
+  "SENT_COST": 40,
+  "SENT_SPARE": 8,
+  "PASS5": 2,
+  "DECK_SAFE": 10,
+  "GEN_DRAW_MIN": 7
+ }
+}
