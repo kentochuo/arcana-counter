@@ -493,6 +493,10 @@ class PersonaPlayer:
                 v = {int(a): b for a, b in v.items()}
             elif k == "RES":
                 v = tuple(v)
+            elif k == "EARLY":
+                v = {int(a): tuple(b) for a, b in v.items()}
+            elif k == "EARLY_G1_SECOND" and v is not None:
+                v = tuple(v)
             setattr(self, k, v)
         self.series = "P3" if deck_key in ("P3", "P3P") else deck_key
         self.deck = []

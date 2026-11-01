@@ -4,14 +4,14 @@
    "1": 8,
    "2": 14,
    "3": 35,
-   "4": 39,
+   "4": 58,
    "5": 66
   },
   "RES": [
    2,
    3,
    4,
-   3
+   2
   ],
   "KEEP_G3": 1,
   "USE_ESOUL": true,
@@ -19,7 +19,23 @@
   "SENT_SPARE": 8,
   "PASS5": 1,
   "DECK_SAFE": 10,
-  "GEN_DRAW_MIN": 7
+  "GEN_DRAW_MIN": 7,
+  "EARLY": {
+   "1": [
+    0,
+    0
+   ],
+   "2": [
+    2,
+    2
+   ]
+  },
+  "EARLY_G1_SECOND": [
+   1,
+   0
+  ],
+  "G1_STOP_DMG": 2,
+  "BC_G2": true
  },
  "P3": {
   "GUARD_TABLE": {
