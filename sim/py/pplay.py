@@ -331,6 +331,103 @@ class HumanPlayer(PersonaPlayer):
             self.L("G3の起動でコール", c, "→", k)
             self.call(c, k, "deck", o)
 
+
+    # ------------------------------------------------------------ 登場時効果のうち、自分で選ぶもの
+    MANUAL_EFF = ("takemi", "togo", "morgana")
+
+    def effect(self, eff, u, circle, opp, in_battle):
+        if eff not in self.MANUAL_EFF:
+            return super().effect(eff, u, circle, opp, in_battle)
+        name = u.card.name
+        self.L(f"  登場時効果[{eff}] {self.short(u.card)}")
+        if eff in ("takemi", "togo"):
+            if name in self.once:
+                return
+            self.once.add(name)
+        a = self.arcana[self.arc(u.card)] if self.arc(u.card) else 0
+        if eff == "morgana":
+            top = list(reversed(self.deck[-5:]))
+            names = "、".join(cname(c) for c in top)
+            cands = [c for c in top if "team" in c.tags and c.kind in ("unit", "sentinel") and c.name != name]
+            if not cands:
+                self.rng.shuffle(self.deck); self.L("  モルガナ:山札の上5枚に対象なし"); return
+            opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade}" + (" 守護者" if c.kind == "sentinel" else "")) for c in cands] + [dict(id="none", label="選ばない")]
+            k = self.ask("eff_pick", "モルガナ:山札の上5枚から〈心の怪盗団〉を1枚まで手札に加えます", opts, desc=f"山札の上5枚:{names}。加えたら手札を1枚ソウルに置きます。")
+            if k == "none":
+                self.rng.shuffle(self.deck); return
+            c = top[int(k[1:])]
+            self.deck.remove(c); self.rng.shuffle(self.deck); self.hand.append(c)
+            self.L("  モルガナ:", cname(c), "を手札に")
+            opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)]
+            j = int(self.ask("eff_soul", "モルガナ:手札から1枚選んでソウルに置いてください", opts))
+            x = self.hand.pop(j); self.soul.append(x); self.L("  モルガナ:", cname(x), "をソウルへ")
+        elif eff == "takemi":
+            cands = [k for k in self.drop if "team" in k.tags and k.kind == "unit" and k.grade <= self.v_grade]
+            if not cands or not (a >= 3 or len(self.soul) >= 1):
+                return
+            seen = []
+            opts = []
+            for j, k in enumerate(self.drop):
+                if k in cands and k.d["no"] not in seen:
+                    seen.append(k.d["no"]); opts.append(self.opt_card(k, f"d{j}", f"G{k.grade} パワー{k.power}"))
+            opts.append(dict(id="none", label="使わない"))
+            pick = self.ask("eff_pick", "武見:ドロップから〈心の怪盗団〉をコールしますか?" + ("(死神3つ:コストなし)" if a >= 3 else "(SB1)"), opts)
+            if pick == "none":
+                return
+            k = self.drop[int(pick[1:])]
+            spot = self.ask_spot(k, "武見")
+            if spot is None or not (a >= 3 or self.pay_sb(1)):
+                return
+            self.drop.remove(k); self.call(k, spot, "drop", opp)
+        elif eff == "togo":
+            g2 = [(k, x) for k, x in self.circles.items() if x and x.card.grade == 2 and "team" in x.card.tags and x.card.kind == "unit"]
+            if not g2:
+                return
+            opts = [dict(id=k, label=f"{cname(x.card)}をソウルへ", no=x.card.d["no"]) for k, x in g2] + [dict(id="none", label="使わない")]
+            k = self.ask("eff_pick", "一二三:(R)のG2〈心の怪盗団〉を1枚ソウルに置いて、山札から別名のG2をコールしますか?", opts)
+            if k == "none":
+                return
+            x = self.circles[k]
+            cands = [c for c in self.deck if c.grade == 2 and "team" in c.tags and c.kind == "unit" and c.name != x.card.name and not c.d["extra"].get("x")]
+            seen, opts = [], []
+            for c in cands:
+                if c.d["no"] not in seen:
+                    seen.append(c.d["no"]); opts.append(self.opt_card(c, c.d["no"], f"パワー{c.power}"))
+            self.soul.append(x.card); self.circles[k] = None
+            self.L("  一二三:", cname(x.card), "をソウルへ")
+            if not opts:
+                self.rng.shuffle(self.deck); return
+            no = self.ask("eff_pick", "一二三:山札からコールするG2を選んでください", opts)
+            tgt = next(c for c in self.deck if c.d["no"] == no)
+            self.deck.remove(tgt); self.rng.shuffle(self.deck)
+            spot = self.ask_spot(tgt, "一二三") or k
+            nu = self.call(tgt, spot, "deck", opp)
+            if a >= 3:
+                nu.bonus += 5000
+
+    def _recarm_target(self):
+        """リカームを使えるか(対象と空きサークルがあるか)だけ判定。対象と場所は使う時に選ぶ"""
+        spot = self.free_front() or self.free_back()
+        if not spot:
+            return None
+        names = {u.card.name for u in self.units()}
+        ks = [k for k in self.drop if "team" in k.tags and k.kind == "unit" and k.name not in names and not self.is_g3(k) and k.grade <= self.v_grade]
+        return (ks[0], spot) if ks else None
+
+    def recarm_manual(self, opp):
+        names = {u.card.name for u in self.units()}
+        seen, opts = [], []
+        for j, k in enumerate(self.drop):
+            if "team" in k.tags and k.kind == "unit" and k.name not in names and not self.is_g3(k) and k.grade <= self.v_grade and k.d["no"] not in seen:
+                seen.append(k.d["no"]); opts.append(self.opt_card(k, f"d{j}", f"G{k.grade} パワー{k.power}"))
+        if not opts:
+            return
+        pick = self.ask("eff_pick", "リカーム:ドロップからコールするユニットを選んでください", opts)
+        k = self.drop[int(pick[1:])]
+        spot = self.ask_spot(k, "リカーム:ユニットのいないサークル", only_empty=True)
+        if spot:
+            self.drop.remove(k); self.call(k, spot, "drop", opp, in_battle=True)
+
     # ------------------------------------------------------------ スキル(アタック時)
     def skill_options(self, gauges_skills, opp, vg=False):
         out = []
@@ -378,10 +475,7 @@ class HumanPlayer(PersonaPlayer):
         elif ex == "hamaon":
             opp.retire_low_grade()
         elif ex == "recarm":
-            t = self._recarm_target()
-            if t:
-                k, spot = t
-                self.drop.remove(k); self.call(k, spot, "drop", opp, in_battle=True)
+            self.recarm_manual(opp)
         elif ex == "recycle":
             c = next(c for c in self.drop if c.kind == "trigger" and c.trig == "crit")
             self.drop.remove(c); self.deck.append(c); self.rng.shuffle(self.deck)
