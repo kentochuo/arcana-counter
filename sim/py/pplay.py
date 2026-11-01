@@ -139,6 +139,19 @@ class HumanPlayer(PersonaPlayer):
                         self.place_marker("愚者")
                     self.L("ペルソナライド")
 
+
+    def ask_spot(self, c, why="", allow=("FL", "FR", "BL", "BC", "BR"), only_empty=False):
+        sopt = []
+        for k in allow:
+            u = self.circles[k]
+            if only_empty and u is not None:
+                continue
+            nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}[k]
+            sopt.append(dict(id=k, label=nm, sub=("空き" if u is None else f"{cname(u.card)}を退却させて置く")))
+        if not sopt:
+            return None
+        return self.ask("call_spot", f"{cname(c)}をどこにコールしますか?" + (f"({why})" if why else ""), sopt, extra=dict(card=c.d["no"]))
+
     # ------------------------------------------------------------ メインフェイズ
     def callable_units(self):
         g = self.v_grade
@@ -253,12 +266,12 @@ class HumanPlayer(PersonaPlayer):
                 self.L("覚醒", u.card, "→", u.gauge)
             elif kind == "nanako":
                 nn = [x for x in self.drop if x.d["no"] == "015"]
-                spot = self.free_back()
+                spot = self.ask_spot(nn[0], "菜々子", only_empty=True) if nn else None
                 if nn and spot and self.pay_sb(1):
                     self.drop.remove(nn[0]); self.call(nn[0], spot, "drop", o); self.L("  菜々子:ドロップからコール")
             elif kind == "dropcall":
                 c = self.drop[int(arg)]
-                spot = self.free_front() or self.free_back()
+                spot = self.ask_spot(c, "ドロップから")
                 if spot is None:
                     continue
                 k2, n = c.d["extra"]["drop_call"]
@@ -281,6 +294,42 @@ class HumanPlayer(PersonaPlayer):
                 self.p4_drive = True; self.L("G3の【起】:ヴァンガード+5000・ドライブ+1")
             elif self.series == "P5":
                 self.p5_bc_drive = True; self.L("G3の【起】:中央後列のペルソナゲージ持ちがヴァンガードにアタックした時ドライブチェック")
+
+
+    # ------------------------------------------------------------ G3の【起】1(山札の上7枚から2体コール)
+    def act1(self, o):
+        top = list(reversed(self.deck[-7:]))          # 山札の上から順に
+        names = "、".join(cname(c) for c in top)
+        team = [c for c in top if "team" in c.tags and c.kind in ("unit", "sentinel")]
+        sec_tag = lambda c: c.kind in ("unit", "sentinel") and ("velvet" in c.tags or ("kyoryoku" in c.tags and self.works(c)))
+        picks = []
+        if team:
+            opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade} パワー{c.power}") for c in team] + [dict(id="none", label="選ばない")]
+            a = self.ask("act1_pick", "G3の【起】:チームのユニットを1枚まで選んでください", opts, desc=f"山札の上7枚:{names}")
+            if a != "none":
+                picks.append(top[int(a[1:])])
+        sec = [c for c in top if sec_tag(c) and c not in picks]
+        if sec:
+            opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade} パワー{c.power}") for c in sec] + [dict(id="none", label="選ばない")]
+            a = self.ask("act1_pick", "G3の【起】:ベルベットルームの住人か協力者を1枚まで選んでください", opts, desc=f"山札の上7枚:{names}")
+            if a != "none":
+                picks.append(top[int(a[1:])])
+        for c in picks:
+            self.deck.remove(c)
+        self.rng.shuffle(self.deck)
+        used = set()
+        for c in picks:
+            sopt = []
+            for k in ("FL", "FR", "BL", "BC", "BR"):
+                if k in used:
+                    continue
+                u = self.circles[k]
+                nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}[k]
+                sopt.append(dict(id=k, label=nm, sub=("空き" if u is None else f"{cname(u.card)}を退却させて置く")))
+            k = self.ask("call_spot", f"{cname(c)}をどこにコールしますか?(G3の【起】)", sopt, extra=dict(card=c.d["no"]))
+            used.add(k)
+            self.L("G3の起動でコール", c, "→", k)
+            self.call(c, k, "deck", o)
 
     # ------------------------------------------------------------ スキル(アタック時)
     def skill_options(self, gauges_skills, opp, vg=False):
