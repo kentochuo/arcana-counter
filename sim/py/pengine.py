@@ -471,6 +471,7 @@ class PersonaPlayer:
     GUARD_TABLE = {1: 8, 2: 14, 3: 35, 4: 65, 5: 110}  # ダメージを受ける時の損(ガード方針:2026/10/23 A/Bで最良だった方針B)
     KEEP_G3 = 1                                        # マリガンで残すG3の枚数
     RESERVE_ADJ = 0                                    # 手札に残す枚数の調整(+で温存、-で展開)
+    ESOUL_CC_FIRST = False                             # エリザベスのソウル起動で、裏のダメージがあればCC1を優先する
     USE_ESOUL = True                                   # エリザベスのソウル起動を使うか
     RES = (2, 3, 4, 5)                                 # 手札に残す枚数(ダメージ0〜2 / 3 / 4 / 5点)
     SENT_COST = 40                                     # 守護者を使う時の損
@@ -1226,7 +1227,7 @@ class PersonaPlayer:
                 facedown = len(self.dmg_zone) - self.cb_avail()
                 if self.energy <= 7 or facedown >= 1:
                     self.hand.remove(el[0]); self.soul.append(el[0]); self.eliz_soul_turn = self.turn
-                    if self.energy <= 7:
+                    if self.energy <= 7 and not (self.ESOUL_CC_FIRST and facedown >= 1):
                         self.ec(3); self.L("エリザベスをソウルへ:エネルギーチャージ3")
                     else:
                         self.cc(1); self.L("エリザベスをソウルへ:カウンターチャージ1")
