@@ -47,6 +47,7 @@ button{font:inherit;color:inherit}
 .big{padding:14px;border-radius:12px;border:0;background:var(--me);color:#fff;font-weight:900;font-size:16px;cursor:pointer}
 .big.sub{background:var(--mat2);border:1px solid var(--line)}
 #loadmsg{font-size:12px;color:var(--muted);text-align:center;min-height:1.4em}
+#start p.hint{font-size:12px;line-height:1.5}
 /* ---------- 対戦画面 */
 #game{position:relative}
 .top{display:flex;align-items:center;gap:6px;padding:4px max(8px,env(safe-area-inset-left,0px)) 4px 8px;flex:none}
@@ -148,10 +149,12 @@ button{font:inherit;color:inherit}
 <body>
 <section class="screen" id="start">
   <h1>ペルソナ対戦練習</h1>
-  <p>自分のデッキを操作して、AIと対戦します。デッキはシミュレーターで探したv4.6レシピです。</p>
+  <p>自分のデッキを操作して、AIと対戦します。デッキはシミュレーターで探した最新のレシピです。</p>
   <div class="grp"><span class="lab">自分のデッキ</span><div class="seg" id="sMe"></div></div>
   <div class="grp"><span class="lab">相手のデッキ(AI)</span><div class="seg" id="sOpp"></div></div>
   <div class="grp"><span class="lab">先攻・後攻</span><div class="seg" id="sFirst"></div></div>
+  <div class="grp"><span class="lab">相手AIの強さ</span><div class="seg" id="sAi"></div>
+    <p class="hint" id="aiHint"></p></div>
   <button class="big" id="bStart" type="button">対戦を始める</button>
   <button class="big sub" id="bResume" type="button" hidden>前回の対戦の続きから</button>
   <div id="loadmsg">準備中…(初回は対戦エンジンの読み込みに少し時間がかかります)</div>
@@ -198,7 +201,7 @@ const LS = "persona-sim-v1";
 const $ = id => document.getElementById(id);
 let TOK = {};
 fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
-let st = {me:"P5", opp:"P3", first:"rand", game:null};
+let st = {me:"P5", opp:"P3", first:"rand", ai:"strong", game:null};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
 
@@ -213,8 +216,8 @@ worker.onmessage = e => {
   if (!p) return;
   if (m.type === "res") p.res(JSON.parse(m.res)); else p.rej(new Error(m.msg));
 };
-function engine(cfg, answers) {
-  return new Promise((res, rej) => { const id = ++reqId; pending[id] = {res, rej}; worker.postMessage({id, cfg, answers}); });
+function engine(cfg, answers, cache) {
+  return new Promise((res, rej) => { const id = ++reqId; pending[id] = {res, rej}; worker.postMessage({id, cfg, answers, cache: cache || []}); });
 }
 
 // ---------- 開始画面
@@ -229,11 +232,15 @@ function renderStart() {
   seg($("sMe"), DECKS.map(d => [d, d]), st.me, v => { st.me = v; save(); renderStart(); }, true);
   seg($("sOpp"), DECKS.map(d => [d, d]), st.opp, v => { st.opp = v; save(); renderStart(); }, true);
   seg($("sFirst"), [["first","先攻"],["second","後攻"],["rand","ランダム"]], st.first, v => { st.first = v; save(); renderStart(); });
+  seg($("sAi"), [["normal","ふつう"],["strong","強い(先読み)"]], st.ai, v => { st.ai = v; save(); renderStart(); });
+  $("aiHint").textContent = st.ai === "strong"
+    ? "ダメージが大きくなる場面のガードで、候補ごとに試合の続きを何十回も試して一番勝てる手を選びます。考えるのに数秒かかることがあります。"
+    : "いつもの判断(シミュレーターで調整した基準)で、すぐに動きます。";
   $("bResume").hidden = !(st.game && !st.game.over);
 }
 function newGame() {
   const first = st.first === "rand" ? Math.random() < .5 : st.first === "first";
-  st.game = {cfg:{me:st.me, opp:st.opp, seed:Math.floor(Math.random() * 1e9), first}, answers:[], over:false};
+  st.game = {cfg:{me:st.me, opp:st.opp, seed:Math.floor(Math.random() * 1e9), first, ai:st.ai}, answers:[], cache:[], over:false};
   save(); openGame();
 }
 $("bStart").onclick = newGame;
@@ -247,9 +254,12 @@ let prevLog = 0;
 async function advance() {
   if (!ready) { $("qt").textContent = "対戦エンジンを読み込み中…"; $("opts").innerHTML = ""; setTimeout(advance, 400); return; }
   busy = true;
-  try { cur = await engine(st.game.cfg, st.game.answers); }
-  catch (e) { $("qt").textContent = "エラー:" + e.message; busy = false; return; }
+  const slow = setTimeout(() => { $("qt").textContent = "相手が考え中…"; $("opts").innerHTML = ""; }, 350);
+  try { cur = await engine(st.game.cfg, st.game.answers, st.game.cache); }
+  catch (e) { clearTimeout(slow); $("qt").textContent = "エラー:" + e.message; busy = false; return; }
+  clearTimeout(slow);
   busy = false; multiSel = new Set();
+  st.game.cache = cur.cache || [];
   const fresh = cur.log.slice(Math.min(prevLog, cur.log.length)).filter(l => !/盤面:|手札:/.test(l)).slice(-8);
   prevLog = cur.log.length;
   $("ev").innerHTML = fresh.map(l => { const m = /^\[(自分|相手) T\d+\] (.*)$/.exec(l); return m ? `<div class="${m[1] === "自分" ? "m" : "a"}">${m[1] === "自分" ? "自" : "相"} ${m[2].replace(/</g, "&lt;")}</div>` : ""; }).join("");

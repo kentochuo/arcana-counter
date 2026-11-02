@@ -39,6 +39,9 @@ class Card:
     def __repr__(self):
         return self.d["name"][:10]
 
+    def __deepcopy__(self, memo):          # カードは変化しないので、盤面をコピーする時も同じものを使う
+        return self
+
 
 def short_name(c):
     n = c.d["name"]
@@ -1941,7 +1944,12 @@ class PersonaPlayer:
                 self.L("  かすみ:ドロップからバインドしてヴァンガード+10000")
                 if need <= 0:
                     return 0
-        # ガードに使えるもの: (種類, 対象, シールド, 失う価値, 追加コストの有無)
+        items = self.guard_items(atk)
+        choice, guard_set = self.choose_guard(atk, items, need)
+        return self.apply_guard(choice, items, guard_set)
+
+    def guard_items(self, atk):
+        """ガードに使えるもの: (種類, 対象, シールド, 失う価値, 追加コストの有無)"""
         items = []
         for c in self.hand:
             if c.kind == "sentinel" or self.is_g3(c):
@@ -1967,7 +1975,11 @@ class PersonaPlayer:
                 items.append(("I", k, 5000, 18, 0))
             elif self.bc_intercept_ok(k, u):
                 items.append(("I", k, 5000, 34 if u.gauge else 22, 0))
-        # 最小コストで need 以上のシールドを集める(シールドを5000単位にしたナップサック)
+        return items
+
+    @staticmethod
+    def knap(items, need):
+        """最小コストで need 以上のシールドを集める(シールドを5000単位にしたナップサック)。(コスト, 使うitemの番号)"""
         unit = 5000
         target = -(-need // unit)
         INF = 10 ** 9
@@ -1981,8 +1993,10 @@ class PersonaPlayer:
                 cst = best[t][0] + it[3]
                 if cst < best[nt][0]:
                     best[nt] = (cst, best[t][1] + [idx])
-        guard_cost, guard_set = best[target]
-        # 守護者
+        return best[target]
+
+    def sentinel_cost(self):
+        INF = 10 ** 9
         sents = [c for c in self.hand if c.kind == "sentinel"]
         sent_cost = INF
         if sents and self.v_grade >= 1:
@@ -1992,12 +2006,22 @@ class PersonaPlayer:
             if free or others:
                 sent_cost = self.SENT_COST + (0 if free else min(self.guard_cost(c) for c in others) if others else 0)
                 sent_cost -= self.SENT_SPARE * (len(sents) - 1)     # 守護者が余っているなら使いやすい
+        return sent_cost
+
+    def choose_guard(self, atk, items, need):
+        """いつもの判断:ダメージの損・ガードの損・守護者の損を比べて一番小さいもの"""
+        guard_cost, guard_set = self.knap(items, need)
+        sent_cost = self.sentinel_cost()
         take = self.take_cost(atk.crit)
         options = [("take", take), ("guard", guard_cost), ("sentinel", sent_cost)]
         choice = min(options, key=lambda x: x[1])[0]
+        return choice, guard_set
+
+    def apply_guard(self, choice, items, guard_set):
         if choice == "take":
             return 0
         if choice == "sentinel":
+            sents = [c for c in self.hand if c.kind == "sentinel"]
             s = sents[0]
             a = self.arc(s)
             free = self.arcana[a] >= 2

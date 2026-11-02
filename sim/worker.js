@@ -14,9 +14,9 @@ const ready = (async () => {
 })().catch(e => postMessage({ type: "fatal", msg: String(e) }));
 onmessage = async e => {
   await ready;
-  const { id, cfg, answers } = e.data;
+  const { id, cfg, answers, cache } = e.data;
   try {
-    const r = step(JSON.stringify(cfg), JSON.stringify(answers));
+    const r = step(JSON.stringify(cfg), JSON.stringify(answers), JSON.stringify(cache || []));
     postMessage({ type: "res", id, res: r });
   } catch (err) {
     postMessage({ type: "err", id, msg: String(err) });

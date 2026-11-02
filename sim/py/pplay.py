@@ -55,10 +55,27 @@ class HumanPlayer(PersonaPlayer):
             a = self.answers[self.qi]
             self.qi += 1
             return a
+        if getattr(self, "autopilot_ok", False):
+            # 先読みの試行中:人の答えが尽きたら、ここからはふだんのAIの判断で動かす
+            self.go_auto()
+            return self.ask(kind, title, options, multi, desc, minn, maxn, extra)
         raise NeedInput(dict(kind=kind, title=title, desc=desc, options=options, multi=multi,
                              min=minn if minn is not None else (0 if multi else 1),
                              max=maxn if maxn is not None else (len(options) if multi else 1),
                              extra=extra or {}))
+
+    def go_auto(self):
+        self.__class__ = AutoHuman
+        for k in ("USE_ESOUL", "GEN_DRAW_MIN"):
+            setattr(self, k, getattr(PersonaPlayer, k))
+        for k, v in pengine.TUNE.get(self.key, {}).items():
+            if k == "GUARD_TABLE":
+                v = {int(a): b for a, b in v.items()}
+            elif k in ("RES", "EARLY_G1_SECOND") and v is not None:
+                v = tuple(v)
+            elif k == "EARLY":
+                v = {int(a): tuple(b) for a, b in v.items()}
+            setattr(self, k, v)
 
     def opt_card(self, c, id_, sub=""):
         return dict(id=id_, label=cname(c), no=c.d["no"], sub=sub)
@@ -832,10 +849,132 @@ class HumanPlayer(PersonaPlayer):
         return total
 
 
+class AutoHuman(HumanPlayer):
+    """先読みの試行用:人の側を、答えが尽きた所からふだんのAIで動かす(進行中のバトルなどは簡単な既定の答えで進める)"""
+    def ask(self, kind, title, options, multi=False, desc="", minn=None, maxn=None, extra=None):
+        if multi:
+            n = minn or 0
+            return [o["id"] for o in options[:n]]
+        ids = [o["id"] for o in options]
+        if kind == "main" and "end" in ids:
+            return "end"
+        return ids[0]
+
+
+for _n, _f in list(HumanPlayer.__dict__.items()):
+    if callable(_f) and hasattr(PersonaPlayer, _n) and _n not in ("__init__", "L", "ask"):
+        setattr(AutoHuman, _n, getattr(PersonaPlayer, _n))
+
+
 class AIPlayer(PersonaPlayer):
+    """相手AI。strong=True なら、重要なガードの判断で先読みする(候補ごとに試合の続きを何十回も試す)"""
+    ROLLOUTS = 16
+    ROUNDS = 3
+    MIN_STAKE = 4
+
+    def __init__(self, *a, strong=False, cache=None, ctx=None, script=None, **k):
+        super().__init__(*a, **k)
+        self.strong = strong
+        self.cache = cache if cache is not None else []     # これまでのガードの判断 [{qi, c, s}]
+        self.ctx = ctx                                       # 先読みのために試合をやり直す材料(cfg, answers)
+        self.script = script                                 # 試行中:決まっている判断(None なら普通の対戦)
+        self.gi = 0
+        self.r_seed = 0
+
     def L(self, *a):
         if self.log is not None:
             self.log.append(f"[相手 T{self.turn}] " + " ".join(str(x) for x in a))
+
+    def choose_guard(self, atk, items, need):
+        k = self.gi; self.gi += 1
+        if self.script is not None:                          # 試行中
+            if k < len(self.script):
+                ch = self.script[k]
+                if k == len(self.script) - 1:
+                    self.determinize()
+                return ch[0], list(ch[1])
+            return super().choose_guard(atk, items, need)
+        if k < len(self.cache):                              # もう決めてある判断
+            e = self.cache[k]
+            if e.get("m"):
+                self.L(e["m"])
+            return e["c"], list(e["s"])
+        d = super().choose_guard(atk, items, need)
+        pick = (d[0], sorted(d[1] or []))
+        self.last_msg = ""
+        if self.strong and self.damage + atk.crit >= self.MIN_STAKE:
+            pick = self.search(atk, items, need, pick)
+        self.cache.append(dict(qi=self.opp.qi, c=pick[0], s=list(pick[1]), m=self.last_msg))
+        return pick[0], list(pick[1])
+
+    def search(self, atk, items, need, default):
+        need0 = atk.power - self.vg_power() + 1
+        opts = [("take", [])]
+        for ex in ((0, 10000, 20000) if atk.drives else (0,)):
+            cost, gs = self.knap(items, need0 + ex)
+            if cost < 10 ** 9:
+                opts.append(("guard", sorted(gs)))
+        if self.sentinel_cost() < 10 ** 9:
+            opts.append(("sentinel", []))
+        opts.append(default)
+        uniq = []
+        for o in opts:
+            if o not in uniq:
+                uniq.append(o)
+        if len(uniq) <= 1:
+            return default
+        cfg, answers = self.ctx
+        prev = [(e["c"], e["s"]) for e in self.cache]
+        alive = list(range(len(uniq))); wins = [0] * len(uniq); tries = [0] * len(uniq)
+        for rnd in range(self.ROUNDS):
+            seeds = [(len(prev) * 100 + rnd) * 1000 + r for r in range(self.ROLLOUTS)]
+            for i in alive:
+                for sd in seeds:
+                    wins[i] += rollout(cfg, answers, prev + [uniq[i]], sd); tries[i] += 1
+            if len(alive) <= 1:
+                break
+            alive.sort(key=lambda i: -wins[i] / tries[i])
+            alive = alive[:max(1, (len(alive) + 1) // 2)]
+        best = max(alive, key=lambda i: wins[i] / tries[i])
+        lab = lambda o: {"take": "ノーガード", "sentinel": "守護者"}.get(o[0], f"ガード{len(o[1])}枚")
+        self.last_msg = "  (先読み) " + " / ".join(f"{lab(o)} {wins[i]}/{tries[i]}" for i, o in enumerate(uniq)) + " → " + lab(uniq[best])
+        self.L(self.last_msg)
+        return uniq[best]
+
+    def determinize(self):
+        """見えない情報をシャッフル:自分と相手の山札の順番、相手(人)の手札"""
+        rng = random.Random(self.r_seed)
+        o = self.opp
+        rng.shuffle(self.deck)
+        pool = o.hand + o.deck
+        rng.shuffle(pool)
+        n = len(o.hand)
+        o.hand, o.deck = pool[:n], pool[n:]
+        self.rng.seed(self.r_seed + 1)
+
+
+def rollout(cfg, answers, script, seed):
+    """先読みの試行:人の答えとAIの判断(script)の通りに最初からやり直し、その先はAI同士で最後まで。AIが勝てば1"""
+    rng = random.Random(cfg["seed"])
+    me = HumanPlayer(cfg["me"], FINAL[cfg["me"]], rng, None, list(answers))
+    me.autopilot_ok = True
+    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, None, script=script)
+    ai.r_seed = seed * 7919 + 13
+    me.opp, ai.opp = ai, me
+    players = [me, ai] if cfg["first"] else [ai, me]
+    try:
+        me.mulligan()
+        for t in range(40):
+            res = players[t % 2].take_turn(players[(t + 1) % 2], t % 2 == 0, None)
+            if res is not None:
+                return int(res is ai)
+        return int(ai.damage < me.damage)
+    except Exception as e:
+        ROLLOUT_ERRORS.append(repr(e))
+        return 0
+
+
+ROLLOUT_ERRORS = []
 
 
 # ================================================================ 盤面の書き出し
@@ -888,12 +1027,13 @@ def snap(p, hide_hand=False):
 
 
 # ================================================================ 進行
-def run(cfg, answers):
-    """cfg: {me, opp, seed, first} answers: [人の選択...]"""
+def run(cfg, answers, cache=None):
+    """cfg: {me, opp, seed, first, ai("normal"/"strong")} answers: [人の選択...] cache: 相手AIのガードの判断(先読みの結果)"""
     rng = random.Random(cfg["seed"])
     log = []
+    cache = [e for e in (cache or []) if e["qi"] <= len(answers)]      # 1手戻した時:それより後の判断は捨てる
     me = HumanPlayer(cfg["me"], FINAL[cfg["me"]], rng, log, list(answers))
-    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, log)
+    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, log, strong=cfg.get("ai") == "strong", cache=cache, ctx=(cfg, list(answers)))
     me.opp, ai.opp = ai, me
     players = [me, ai] if cfg["first"] else [ai, me]
     state = dict(winner=None, turn_no=0)
@@ -909,7 +1049,7 @@ def run(cfg, answers):
         raise GameOver("me" if me.damage < ai.damage else "ai")
     except NeedInput as e:
         return dict(status="ask", q=e.q, me=snap(me), ai=snap(ai, hide_hand=True), log=log, n=len(answers),
-                    active="me" if getattr(me, "in_turn", False) else "ai")
+                    active="me" if getattr(me, "in_turn", False) else "ai", cache=ai.cache)
     except GameOver as e:
         why = ""
         loser = ai if e.winner == "me" else me
@@ -917,8 +1057,8 @@ def run(cfg, answers):
             why = "山札切れ"
         elif loser.damage >= 6:
             why = "ダメージ6点"
-        return dict(status="over", winner=e.winner, why=why, me=snap(me), ai=snap(ai), log=log, n=len(answers))
+        return dict(status="over", winner=e.winner, why=why, me=snap(me), ai=snap(ai), log=log, n=len(answers), cache=ai.cache)
 
 
-def step(cfg_json, answers_json):
-    return json.dumps(run(json.loads(cfg_json), json.loads(answers_json)), ensure_ascii=False)
+def step(cfg_json, answers_json, cache_json="[]"):
+    return json.dumps(run(json.loads(cfg_json), json.loads(answers_json), json.loads(cache_json)), ensure_ascii=False)
