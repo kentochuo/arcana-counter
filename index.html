@@ -5,102 +5,108 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="アルカナ">
-<meta name="theme-color" content="#0b0d14">
+<meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>アルカナカウンター</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap">
 <style>
-/* レイアウト:上に細い共通の操作帯、残りを1人分(または2人分を上下に)のパネルで埋める。1画面固定でスクロールなし */
+/* デジタル庁デザインシステム(DADS)の色・文字・部品にそろえた明るい配色。
+   レイアウト:上に細い共通の操作帯、残りを1人分(または2人分を上下に)のパネルで埋める。1画面固定でスクロールなし */
 :root{
-  --bg:#0b0d14; --panel:#151926; --line:#2a3044; --fg:#eef1f8; --muted:#8c94ab;
-  --display:"Anton","Impact","Arial Narrow",sans-serif;
-  --body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
-  color-scheme:dark;
+  color-scheme:light;
+  --bg:#ffffff; --panel:#f2f2f2; --line:#949494; --line2:#cccccc; --fg:#333333; --strong:#1a1a1a; --muted:#666666;
+  --key:#0017c1; --key-1000:#00118f; --key-50:#e8f1fe; --key-200:#c5d7fb; --focus:#ffd43d; --error:#ce0000;
+  --display:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;
+  --body:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Sans','Hiragino Kaku Gothic ProN',sans-serif;
 }
-.side{--accent:#2f8cff;--accent-ink:#fff}
-.side[data-deck="P3"]{--accent:#2f8cff;--accent-ink:#fff}
-.side[data-deck="P3P"]{--accent:#ff5fa2;--accent-ink:#fff}
-.side[data-deck="P4"]{--accent:#ffd21f;--accent-ink:#1a1400}
-.side[data-deck="P5"]{--accent:#ff2a2a;--accent-ink:#fff}
+.side{--accent:#0066be;--accent-ink:#fff;--accent-text:#0055ad}
+.side[data-deck="P3"]{--accent:#0066be;--accent-ink:#fff;--accent-text:#0055ad}
+.side[data-deck="P3P"]{--accent:#c000c0;--accent-ink:#fff;--accent-text:#8b008b}
+.side[data-deck="P4"]{--accent:#d2a400;--accent-ink:#1a1a1a;--accent-text:#6e5600}
+.side[data-deck="P5"]{--accent:#ce0000;--accent-ink:#fff;--accent-text:#a90000}
 html,body{height:100%}
 *{touch-action:manipulation}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{background:var(--bg);color:var(--fg);font-family:var(--body);margin:0;overflow:hidden;
+body{background:var(--bg);color:var(--fg);font-family:var(--body);letter-spacing:.02em;margin:0;overflow:hidden;
   -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 .app{height:100%;display:flex;flex-direction:column;gap:6px;box-sizing:border-box;
   padding-block:6px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px))}
 .top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px}
-.seg button{font:700 13px/1 var(--body);color:var(--muted);background:none;border:0;border-radius:999px;padding:7px 11px;cursor:pointer;white-space:nowrap}
-.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
-.side .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+/* 選択ボタン:選ばれたものはキーカラー(各プレイヤーの中ではデッキの色)の塗り */
+.seg{display:flex;gap:4px}
+.seg button{font:700 13px/1 var(--body);letter-spacing:.02em;color:var(--fg);background:var(--bg);border:1px solid #767676;border-radius:6px;min-height:36px;padding:0 11px;cursor:pointer;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--key);border-color:var(--key);color:#fff}
+.side .seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+@media (hover:hover){.seg button[aria-pressed="false"]:hover{background:var(--key-50);border-color:var(--key)}}
 .spacer{flex:1}
-.act{font:700 12px/1 var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap}
-.act.on{border-color:var(--accent,var(--fg));color:var(--accent,var(--fg))}
-.act.warn{background:#5a1420;border-color:#ff5a6e;color:#fff}
-button:focus-visible,.tile:focus-visible{outline:2px solid var(--accent,#fff);outline-offset:2px}
+.act{font:700 13px/1 var(--body);letter-spacing:.02em;color:var(--key);background:var(--bg);border:1px solid currentColor;border-radius:6px;min-height:36px;padding:0 10px;cursor:pointer;white-space:nowrap}
+@media (hover:hover){.act:hover{background:var(--key-200);color:var(--key-1000);text-decoration:underline}}
+.act.on{background:var(--key-50)}
+.act.warn{background:var(--error);border-color:var(--error);color:#fff}
+button:focus-visible,.tile:focus-visible{outline:4px solid #000;outline-offset:2px;box-shadow:0 0 0 2px var(--focus)}
 .sides{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
 .side{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px}
-.duel .side{border:1px solid var(--line);border-radius:12px;padding:6px;box-sizing:border-box}
+.duel .side{border:1px solid var(--line2);border-top:4px solid var(--accent);border-radius:12px;padding:6px;box-sizing:border-box;background:var(--panel)}
 .duel .side.opp.flip{transform:rotate(180deg)}
 .bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .duel .bar{flex-wrap:nowrap}
-.duel .side .seg button{padding:6px 8px;font-size:12px}
-.duel .side .act{padding:6px 8px}
-.who{font:900 12px/1 var(--body);letter-spacing:.1em;color:var(--accent)}
-.hint{font-size:11px;color:var(--muted)}
+.duel .side .seg button{padding:0 8px;font-size:12px;min-height:32px}
+.duel .side .act{padding:0 8px;min-height:32px}
+.who{font:700 13px/1 var(--body);letter-spacing:.04em;color:var(--accent-text)}
+.hint{font-size:12px;color:var(--muted)}
 .grid{flex:1;min-height:0;display:grid;gap:6px;align-content:center;justify-content:center}
-.tile{position:relative;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
-  border-radius:9px;overflow:hidden;cursor:pointer;touch-action:manipulation;transition:border-color .15s,box-shadow .15s}
-.tile .art{position:relative;flex:1;min-height:0;overflow:hidden;background:#000}
-.tile img{width:100%;height:100%;object-fit:cover;display:block;filter:grayscale(.9) brightness(.45);transition:filter .2s}
+.tile{position:relative;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;overflow:hidden;cursor:pointer;touch-action:manipulation;transition:border-color .15s,box-shadow .15s}
+.tile .art{position:relative;flex:1;min-height:0;overflow:hidden;background:#e6e6e6}
+.tile img{width:100%;height:100%;object-fit:cover;display:block;filter:grayscale(1) opacity(.45);transition:filter .2s}
 .ar .tile img{object-fit:contain}
-.tile[data-n="1"] img{filter:grayscale(.35) brightness(.7)}
-.tile[data-n="2"] img{filter:grayscale(.1) brightness(.88)}
+.tile[data-n="1"] img{filter:grayscale(.4) opacity(.75)}
+.tile[data-n="2"] img{filter:grayscale(.1) opacity(.92)}
 .tile[data-n="3"] img{filter:none}
-.tile[data-n="3"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 16px -4px var(--accent)}
-.num{position:absolute;left:5px;top:2px;font-family:var(--display);font-size:var(--fs-num,22px);color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.85)}
+.tile[data-n="3"]{border:3px solid var(--accent)}
+.num{position:absolute;left:4px;top:3px;font:700 var(--fs-num,20px)/1 var(--display);color:#fff;background:rgba(26,26,26,.75);border-radius:4px;padding:2px 5px}
 .ar .num{display:none}
-.count{position:absolute;right:4px;bottom:4px;font-family:var(--display);font-size:var(--fs-count,44px);line-height:1;color:#fff;
-  font-variant-numeric:tabular-nums;background:rgba(5,7,12,.72);border-radius:8px;padding:2px 7px 0;min-width:.9em;text-align:center}
-.tile[data-n="3"] .count{color:var(--accent)}
-.foot{display:flex;align-items:center;gap:5px;padding:4px 5px 5px}
-.name{font-weight:900;font-size:var(--fs-name,14px);letter-spacing:.05em;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.count{position:absolute;right:4px;bottom:4px;font:900 var(--fs-count,44px)/1 var(--display);color:#fff;
+  font-variant-numeric:tabular-nums;background:rgba(26,26,26,.8);border-radius:8px;padding:3px 8px 4px;min-width:.9em;text-align:center}
+.tile[data-n="3"] .count{background:var(--accent);color:var(--accent-ink)}
+.foot{display:flex;align-items:center;gap:5px;padding:4px 6px 5px;border-top:1px solid var(--line2)}
+.name{font-weight:700;font-size:var(--fs-name,14px);color:var(--strong);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pips{display:flex;gap:4px}
-.pip{width:var(--pip,10px);height:var(--pip,10px);transform:rotate(45deg);border:1.5px solid var(--muted);box-sizing:border-box}
+.pip{width:var(--pip,10px);height:var(--pip,10px);transform:rotate(45deg);border:1.5px solid #767676;box-sizing:border-box}
 .pip.on{background:var(--accent);border-color:var(--accent)}
-.minus{position:absolute;right:3px;top:3px;width:var(--minus,34px);height:var(--minus,34px);border-radius:7px;
-  border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.65);color:#fff;font:700 calc(var(--minus,34px)*.62)/1 var(--body);cursor:pointer;padding:0}
+.minus{position:absolute;right:3px;top:3px;width:var(--minus,34px);height:var(--minus,34px);border-radius:6px;
+  border:1px solid #767676;background:rgba(255,255,255,.95);color:var(--strong);font:700 calc(var(--minus,34px)*.62)/1 var(--body);cursor:pointer;padding:0}
 .minus[disabled]{display:none}
-.edit .tile{opacity:.4}
-.edit .tile.sel{opacity:1;border-color:var(--accent)}
+.edit .tile{opacity:.45}
+.edit .tile.sel{opacity:1;border:3px solid var(--accent)}
 .edit .count,.edit .minus,.edit .pips{display:none}
-.edit .tile img{filter:grayscale(.2) brightness(.8)}
-.check{display:none;position:absolute;right:5px;top:5px;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
-  font:900 13px/20px var(--body);text-align:center}
+.edit .tile img{filter:grayscale(.1)}
+.check{display:none;position:absolute;right:5px;top:5px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+  font:700 13px/22px var(--body);text-align:center}
 .edit .tile.sel .check{display:block}
 
 /* 横向きなど高さが足りない時:共通の操作帯は右上の歯車にしまい、各プレイヤーの操作は左の縦列に寄せてカードの高さを確保 */
 .gear{display:none;position:fixed;z-index:20;top:calc(4px + env(safe-area-inset-top,0px));right:max(6px,env(safe-area-inset-right,0px));
-  width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:700 17px/1 var(--body);cursor:pointer;padding:0}
+  width:36px;height:36px;border-radius:6px;border:1px solid currentColor;background:var(--bg);color:var(--key);font:700 17px/1 var(--body);cursor:pointer;padding:0}
 .compact .gear{display:block}
 .compact .top{display:none}
-.compact.menu .top{display:flex;position:fixed;z-index:19;top:calc(4px + env(safe-area-inset-top,0px));right:max(46px,calc(env(safe-area-inset-right,0px) + 46px));
-  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.compact.menu .top{display:flex;position:fixed;z-index:19;top:calc(4px + env(safe-area-inset-top,0px));right:max(48px,calc(env(safe-area-inset-right,0px) + 48px));
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 6px 20px 4px rgba(0,0,0,.1),0 2px 6px 0 rgba(0,0,0,.3)}
 .compact.menu .top .spacer{display:none}
 .compact .side{flex-direction:row}
 .compact .bar{flex-direction:column;flex-wrap:nowrap;align-items:stretch;justify-content:center;width:76px;flex:none}
 .compact .bar .spacer{display:none}
-.compact .side .seg{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-radius:10px;padding:2px}
-.compact .side .seg button{padding:6px 0;font-size:11px;border-radius:7px}
+.compact .side .seg{display:grid;grid-template-columns:1fr 1fr;gap:3px}
+.compact .side .seg button{padding:0;min-height:30px;font-size:11px;border-radius:4px}
 .compact .bar{gap:4px}
 .compact .app,.app.compact{padding-right:max(46px,calc(env(safe-area-inset-right,0px) + 40px))}
-.compact .side .act{padding:6px 4px;font-size:11px;text-align:center}
+.compact .side .act{padding:0 4px;min-height:30px;font-size:11px;text-align:center}
 .compact .who{text-align:center}
 .compact .hint{display:none}
 .compact.duel .pips{display:none}
@@ -108,10 +114,6 @@ button:focus-visible,.tile:focus-visible{outline:2px solid var(--accent,#fff);ou
 .compact .side.me .grid{padding-right:34px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
-<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}*{-webkit-touch-callout:none}</style>
-</head>
-<body>
-
 
 <div class="app" id="app">
   <button class="gear" id="gear" type="button" aria-label="表示の設定">⚙</button>
