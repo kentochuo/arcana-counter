@@ -887,8 +887,14 @@ class PersonaPlayer:
                 if a >= 3:
                     self.v_temp += 10000
         elif eff == "chie_search":
-            k = self.look_top(7, lambda x: "team" in x.tags and x.kind == "unit" and x.name != name and not self.is_g3(x),
-                              lambda x: self.unit_score(x))
+            # 〈自称特別捜査隊〉なら主人公G3・守護者(りせ)も選べる。手札にG3がなければG3、次に守護者を優先
+            need_sent = not any(c.kind == "sentinel" for c in self.hand)
+            need_g3 = not any(self.is_g3(c) for c in self.hand)
+            def csc(x):
+                if self.is_g3(x): return 2000 if need_g3 else -2000
+                if x.kind == "sentinel": return 1000 if need_sent else -1000
+                return self.unit_score(x)
+            k = self.look_top(7, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, csc)
             if k:
                 self.hand.append(k)
                 if not (self.cb_avail() >= 2 and self.pay_cb(1)):
