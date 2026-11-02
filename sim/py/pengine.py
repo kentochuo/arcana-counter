@@ -482,6 +482,8 @@ class PersonaPlayer:
     G1_STOP_DMG = 2                                    # G1の時、相手のダメージがこの点数以上なら前列に出さない
     G1_BACK_BC = False                                 # G1の時の後列はヴァンガードの後ろ(中央後列)に置く
     BACK_ORDER = ("BL", "BR", "BC")                    # G1/G2の時に後列を埋める順番
+    YUKIKO_SMART = False                               # 雪子の付与:相手を選び、ターン終了時の「退却して1枚引く」を必要な時だけ使う
+    YUKIKO_HAND = 3                                    # (YUKIKO_SMART時)手札がこの枚数以下なら退却して引く
     BC_G2 = True                                       # G3の時、中央後列にチームのG2を置いてアタックさせる(False:G1を置いてヴァンガードをブースト)
     BC_G2_P3 = True                                   # P3/P3P:エリザベスが無い時、中央後列にS.E.E.S.のG2を置いてアタックさせる
     DECK_SAFE = 10                                     # 山札がこの枚数以下なら、G3の【起】1(山札から2体コール)や任意のドローを控える
@@ -803,7 +805,7 @@ class PersonaPlayer:
             if opp and self.cb_avail() >= 1 and opp.retire_one():
                 self.pay_cb(1)
         elif eff == "cb_recall_amada":
-            if self.cb_avail() >= 1:
+            if self.cb_avail() >= 1 and not in_battle:                 # 「あなたのメインフェイズに」登場した時だけ
                 cands = [k for k in self.drop if k.name in ("無敗のボクサー 真田 明彦", "義理堅き忠犬 コロマル")
                          and all(not x or x.card.name != k.name for x in self.circles.values())]
                 spot = self.free_front()
@@ -892,8 +894,8 @@ class PersonaPlayer:
             need_sent = not any(c.kind == "sentinel" for c in self.hand)
             need_g3 = not any(self.is_g3(c) for c in self.hand)
             def csc(x):
-                if self.is_g3(x): return 2000 if need_g3 else -2000
-                if x.kind == "sentinel": return 1000 if need_sent else -1000
+                if self.is_g3(x): return 2_000_000 if need_g3 else -2_000_000      # ユニットの評価(1万台)より必ず大きく
+                if x.kind == "sentinel": return 1_000_000 if need_sent else -1_000_000
                 return self.unit_score(x)
             k = self.look_top(7, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, csc)
             if k:
@@ -903,7 +905,12 @@ class PersonaPlayer:
         elif eff == "yukiko":
             others = [x for x in self.units() if x is not u and "team" in x.card.tags and x.card.kind == "unit"]
             if others:
-                others[0].end_draw_retire = True
+                if self.YUKIKO_SMART:
+                    # ロック・シールド0で次のターン役に立たないユニット、なければ一番弱いユニットに与える
+                    tgt = min(others, key=lambda x: (not (x.locked or x.doomed), self.unit_score(x.card)))
+                else:
+                    tgt = others[0]
+                tgt.end_draw_retire = True
         elif eff == "nanako":
             k = self.look_top(7, lambda x: x.kind == "unit" and (self.is_g3(x) or x.no in ("012", "040")),
                               lambda x: 2 if self.is_g3(x) and not any(self.is_g3(h) for h in self.hand) else (1 if x.no == "012" else 0))
@@ -958,8 +965,8 @@ class PersonaPlayer:
             need_sent = not any(c.kind == "sentinel" for c in self.hand)
             need_g3 = not any(self.is_g3(c) for c in self.hand)
             def msc(x):
-                if self.is_g3(x): return 2000 if need_g3 else -2000
-                if x.kind == "sentinel": return 1000 if need_sent else -1000
+                if self.is_g3(x): return 2_000_000 if need_g3 else -2_000_000      # ユニットの評価(1万台)より必ず大きく
+                if x.kind == "sentinel": return 1_000_000 if need_sent else -1_000_000
                 return self.unit_score(x)
             k = self.look_top(5, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, msc)
             if k:
@@ -1482,7 +1489,7 @@ class PersonaPlayer:
             return
         for k, u in self.circles.items():
             if u and u.card.d["no"] == "016":
-                self.circles[k] = None
+                self.circles[k] = None; self.bind.append(u.card)
                 self.marie_pr_used = True
                 self.persona_this_turn = True
                 self.draw(1)
@@ -1729,6 +1736,10 @@ class PersonaPlayer:
             if remaining:
                 plan.append(remaining[0])
                 self.restand = getattr(self, "restand", set()) | {remaining[0][0]}
+            else:
+                # 選ばなかったら、1枚引き、手札からユニットカードを1枚まで(R)にコール
+                self.draw(1)
+                self.over_call(opp)
         else:
             if now or nxt is None:
                 atk.power += 10000
@@ -1744,6 +1755,22 @@ class PersonaPlayer:
             elif t == "heal":
                 if self.damage > 0 and self.damage >= opp.damage:
                     self.drop.append(self.dmg_zone.pop()[0])
+
+    def over_call(self, opp):
+        """オーバートリガーの追加効果(スタンドしているリアガードを選ばなかった時):手札からユニットを1枚(R)にコール"""
+        cands = [c for c in self.hand if c.kind == "unit" and 1 <= c.grade <= self.v_grade and not self.is_g3(c)]
+        spot = self.free_front()
+        if spot:
+            g2 = [c for c in cands if c.grade == 2]
+            if g2:
+                best = max(g2, key=self.unit_score); self.hand.remove(best)
+                self.L("  オーバートリガー:手札から", self.short(best), "をコール"); self.call(best, spot, "hand", opp, in_battle=True)
+                return
+        spot = self.free_back()
+        g1 = [c for c in cands if c.grade == 1]
+        if spot and g1:
+            best = max(g1, key=lambda c: self.back_score(c, spot)); self.hand.remove(best)
+            self.L("  オーバートリガー:手札から", self.short(best), "をコール"); self.call(best, spot, "hand", opp, in_battle=True)
 
     def end_phase(self, o):
         # エネルギージェネレーター:【起】【ターン1回】EB7で1枚引く(バトル後、余ったエネルギーで使う)
@@ -1776,8 +1803,9 @@ class PersonaPlayer:
             if u.end_retire:
                 self.drop.append(u.card); self.circles[k] = None
                 continue
-            if u.end_draw_retire:
+            if u.end_draw_retire and (not self.YUKIKO_SMART or u.locked or u.doomed or len(self.hand) <= self.YUKIKO_HAND):
                 self.drop.append(u.card); self.circles[k] = None; self.draw(1)
+                self.L(f"  {self.short(u.card)}:退却して1枚引く(雪子)")
                 continue
             if u.end_hand:
                 self.hand.append(u.card); self.circles[k] = None
@@ -1928,7 +1956,7 @@ class PersonaPlayer:
             items.append(("H", c, base + (boost if can_boost else 0), self.guard_cost(c) + (4 if can_boost else 0), 1 if can_boost else 0))
         for k in ("FL", "FR"):
             u = self.circles[k]
-            if u and (u.card.grade == 2 or "velvet" in u.card.tags and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) and not u.locked and not u.doomed and not getattr(self, "no_intercept", False) \
+            if u and (u.card.grade == 2 or ("velvet" in u.card.tags or "kyoryoku" in u.card.tags) and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) and not u.locked and not u.doomed and not getattr(self, "no_intercept", False) \
                     and not getattr(atk, "sweep", False):   # 前列すべてとバトル:アタックされている前列のリアガードはインターセプトできない
                 items.append(("I", k, 5000, 34 if u.gauge else 22, 0))
         for k in ("BL", "BR", "BC"):

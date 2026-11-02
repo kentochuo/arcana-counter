@@ -705,6 +705,20 @@ class HumanPlayer(PersonaPlayer):
                 k = self.ask("over", "オーバートリガー:アタックしたバトル終了時にスタンドするリアガードを選んでください", opts)
                 if k != "none":
                     self.restand.add(k)
+            else:
+                k = "none"
+            if k == "none":
+                # 選ばなかったら、1枚引き、手札からユニットカードを1枚まで(R)にコール
+                self.draw(1)
+                cc = [(j, c) for j, c in enumerate(self.hand) if c.kind == "unit" and 1 <= c.grade <= self.v_grade and not self.is_g3(c)]
+                spots_ok = [k2 for k2 in ("FL", "FR", "BL", "BC", "BR") if self.circles[k2] is None]
+                if cc and spots_ok:
+                    opts2 = [self.opt_card(c, j) for j, c in cc] + [dict(id="none", label="コールしない")]
+                    j = self.ask("over_call", "オーバートリガー:1枚引きました。手札からユニットを1枚(R)にコールできます", opts2)
+                    if j != "none":
+                        c = self.hand[int(j)]
+                        spot = self.ask_spot(c, "オーバートリガー", only_empty=True)
+                        self.hand.remove(c); self.call(c, spot, "hand", opp, in_battle=True)
         else:
             nmj = {"crit": "クリティカル", "draw": "ドロー", "heal": "ヒール"}[t]
             if t == "crit":
@@ -759,7 +773,7 @@ class HumanPlayer(PersonaPlayer):
             opts.append(dict(id=f"H{i}", label=cname(c), no=c.d["no"], sub=f"シールド{sh}" + ("(SB1かEB2)" if can_boost else "")))
         for k in ("FL", "FR"):
             u = self.circles[k]
-            if u and (u.card.grade == 2 or "velvet" in u.card.tags and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) \
+            if u and (u.card.grade == 2 or ("velvet" in u.card.tags or "kyoryoku" in u.card.tags) and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) \
                     and not u.locked and not u.doomed and not getattr(self, "no_intercept", False) and not getattr(atk, "sweep", False):
                 items.append((f"I{k}", k, 5000, 0)); opts.append(dict(id=f"I{k}", label=f"インターセプト:{cname(u.card)}", no=u.card.d["no"], sub="シールド5000"))
         for k in ("BL", "BR", "BC"):
