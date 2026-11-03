@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import os
 import random
 from collections import Counter
 
@@ -2028,6 +2029,19 @@ class PersonaPlayer:
             return 1
 
     def choose_guard(self, atk, items, need):
+        """ガードの判断。環境変数 LEARN_GUARD に学習モデル(JSON)を指定すると、自己学習したモデルで選ぶ(2026/11/03)"""
+        if LEARN_PRED is not None and self.damage + atk.crit >= 2:
+            import learn_ai
+            opts, default = learn_ai.guard_options(self, atk, items, need)
+            if len(opts) <= 1:
+                return default[0], list(default[1])
+            sf = learn_ai.state_features(self, atk)
+            pr = LEARN_PRED([sf + learn_ai.option_features(self, atk, items, o) for o in opts])
+            pick = opts[max(range(len(opts)), key=lambda i: pr[i])]
+            return pick[0], list(pick[1])
+        return self.base_choose_guard(atk, items, need)
+
+    def base_choose_guard(self, atk, items, need):
         """いつもの判断:ダメージの損・ガードの損・守護者の損を比べて一番小さいもの
         (このターン最後のアタックならダメージの損を重く、まだアタックが残っていれば軽く見る:先読みAIの判断の集計から)"""
         guard_cost, guard_set = self.knap(items, need)
@@ -2104,6 +2118,12 @@ class PersonaPlayer:
 
 
 # =============================================================== 対戦
+LEARN_PRED = None
+if os.environ.get("LEARN_GUARD"):
+    import learn_model as _lm
+    LEARN_PRED = _lm.load_fast(os.environ["LEARN_GUARD"])
+
+
 class PGame:
     def __init__(self, a, b, seed, a_first, log=None):
         """a, b: ('persona', deck_key, recipe) か DeckProfile"""

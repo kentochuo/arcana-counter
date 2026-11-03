@@ -22,7 +22,7 @@ def guard_options(p, atk, items, need):
             out.append(("guard", tuple(sorted(gs))))
     if p.sentinel_cost() < INF:
         out.append(("sentinel", ()))
-    d = PersonaPlayer.choose_guard(p, atk, items, need)
+    d = PersonaPlayer.base_choose_guard(p, atk, items, need)
     dd = (d[0], tuple(sorted(d[1] or [])))
     if dd[0] == "take":
         dd = ("take", ())
