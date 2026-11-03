@@ -51,6 +51,7 @@ class HumanPlayer(PersonaPlayer):
     # ------------------------------------------------------------ 質問
     def ask(self, kind, title, options, multi=False, desc="", minn=None, maxn=None, extra=None):
         """options: [{id, label, no(カード番号 任意), sub(補足 任意)}]"""
+        hint = self.__dict__.pop("_hint", None)
         if self.qi < len(self.answers):
             a = self.answers[self.qi]
             self.qi += 1
@@ -59,10 +60,165 @@ class HumanPlayer(PersonaPlayer):
             # 先読みの試行中:人の答えが尽きたら、ここからはふだんのAIの判断で動かす
             self.go_auto()
             return self.ask(kind, title, options, multi, desc, minn, maxn, extra)
+        ai = None
+        if getattr(self, "SHOW_AI", True):
+            try:
+                ai = hint() if callable(hint) else (hint or self.ai_hint(kind, options, multi, extra or {}))
+                if ai:
+                    ids = [str(o["id"]) for o in options]
+                    ai = dict(ids=[str(x) for x in ai[0] if str(x) in ids], why=ai[1])
+                    if not ai["ids"] and not multi:
+                        ai = None
+            except Exception as ex:          # おすすめの計算に失敗しても対戦は止めない
+                ai = None
         raise NeedInput(dict(kind=kind, title=title, desc=desc, options=options, multi=multi,
                              min=minn if minn is not None else (0 if multi else 1),
                              max=maxn if maxn is not None else (len(options) if multi else 1),
-                             extra=extra or {}))
+                             extra=extra or {}, ai=ai))
+
+    # ------------------------------------------------------------ 「AIならこれを選ぶ」(ふつうのAIの判断を写して計算する)
+    def hint(self, fn):
+        """次の質問のおすすめ(計算は質問を出す時だけ行う)"""
+        self._hint = fn
+
+    def shadow(self):
+        """盤面をコピーして、自分側をふだんのAIにしたもの(おすすめの計算用。本物の盤面は変えない)"""
+        import copy as _copy
+        pc = _copy.deepcopy(self)
+        pc.answers = []; pc.qi = 0; pc.log = []
+        pc.opp.log = []
+        pc.go_auto()
+        return pc
+
+    NMS = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右", "V": "ヴァンガード"}
+
+    def ai_spot(self, c, ids):
+        """ふだんのAIがこのカードを置く場所"""
+        g = self.v_grade
+        if c.grade >= 2:
+            bc = self.circles["BC"]
+            if self.series in ("P4", "P5") and g >= 3 and self.free_front() is None and (bc is None or "team" not in bc.card.tags or bc.card.grade < 2):
+                k = "BC"
+            else:
+                k = self.free_front() or min(("FL", "FR"), key=lambda x: self.unit_score(self.circles[x].card) if self.circles[x] else -1)
+        else:
+            bce = self.circles["BC"] and self.circles["BC"].card.d["extra"].get("elizabeth")
+            if c.d["extra"].get("elizabeth") and self.key in ("P3", "P3P") and g >= 3 and not bce:
+                k = "BC"
+            else:
+                k = self.free_back() or "BL"
+        return k if k in ids else (ids[0] if ids else None)
+
+    def sim_main(self):
+        """ふだんのAIが今のメインフェイズで最初にすること"""
+        pc = self.shadow()
+        ev = pc.log
+        orig_call, orig_act1 = pc.call, pc.act1
+        def call(card, circle, from_where="hand", opp=None, in_battle=False):
+            ev.append(("CALL", card, circle, from_where))
+            return orig_call(card, circle, from_where, opp, in_battle)
+        used = self.act1_turn == self.turn
+        def act1(o):
+            if used:                 # このターンはもう使った(AIのメインフェイズは1回しか起動しない前提なので、ここで止める)
+                return
+            ev.append(("ACT1",))
+            return orig_act1(o)
+        pc.call, pc.act1 = call, act1
+        hand_before = list(self.hand)
+        pc.main_phase(pc.opp)
+        self._ai_spots = {}
+        first = None
+        for e in ev:
+            if isinstance(e, tuple) and e[0] == "CALL" and e[3] == "hand":
+                self._ai_spots.setdefault(e[1].d["no"], e[2])
+        for e in ev:
+            if isinstance(e, tuple):
+                if e[0] == "ACT1":
+                    first = (["act1"], "G3の【起】で山札からアタッカーを2体コールします(最初に使う)"); break
+                if e[0] == "CALL" and e[3] == "hand":
+                    i = next((j for j, c in enumerate(hand_before) if c is e[1]), None)
+                    if i is not None:
+                        first = ([f"call:{i}"], f"{cname(e[1])}を{self.NMS.get(e[2], e[2])}にコールします"); break
+                if e[0] == "CALL" and e[3] == "drop":
+                    if e[1].d["no"] == "015":
+                        first = (["nanako"], "菜々子をドロップからコールします"); break
+                    j = next((j for j, c in enumerate(self.drop) if c is e[1]), None)
+                    if j is not None:
+                        first = ([f"dropcall:{j}"], f"{cname(e[1])}をドロップからコールします"); break
+            elif isinstance(e, str):
+                t = e.split("] ", 1)[-1].strip()
+                if t.startswith("エリザベスをソウルへ:エネルギー"):
+                    first = (["eliz:ec"], "エリザベスをソウルに置いてエネルギー+3"); break
+                if t.startswith("エリザベスをソウルへ:カウンター"):
+                    first = (["eliz:cc"], "エリザベスをソウルに置いてカウンターチャージ1"); break
+                if t.startswith("覚醒"):
+                    for k, u in self.circles.items():
+                        pu = pc.circles.get(k)
+                        if u and pu and u.gauge != pu.gauge:
+                            first = ([f"awaken:{k}"], f"{cname(u.card)}を覚醒させます"); break
+                    if first:
+                        break
+        return first or (["end"], "AIならこれ以上は何もせずバトルへ進みます(手札を守りに残す)")
+
+    def ai_hint(self, kind, options, multi, extra):
+        ids = [str(o["id"]) for o in options]
+        o = self.opp
+        if kind == "mulligan":
+            back, g3k, sk = [], 0, 0
+            for i, c in enumerate(self.hand):
+                if c.kind == "unit" and c.grade in (1, 2) and not self.is_g3(c):
+                    continue
+                if self.is_g3(c) and g3k < 1:
+                    g3k += 1; continue
+                if c.kind == "sentinel" and sk < 1:
+                    sk += 1; continue
+                back.append(str(i))
+            return back, "G3を1枚・G1とG2のユニット・守護者1枚を残し、トリガーと2枚目以降のG3を戻します"
+        if kind == "ride_cost":
+            pref = [i for i, c in enumerate(self.hand) if c.d["extra"].get("discard_search") in ("persona_ability", "velvet")]
+            cand = pref or list(range(len(self.hand)))
+            i = min(cand, key=lambda j: self.card_value(self.hand[j]))
+            c = self.hand[i]
+            why = "捨てると山札の上7枚から代わりを持ってこられる" if pref else "手札の中で一番いらないカード"
+            return [str(i)], f"{cname(c)}を捨てます({why})"
+        if kind in ("persona_ride", "marie"):
+            return ["yes"], "ペルソナライドは毎ターン行います(前列+10000、1枚引く)"
+        if kind == "main":
+            return self.sim_main()
+        if kind == "call_spot":
+            no = (extra or {}).get("card")
+            sp = getattr(self, "_ai_spots", {}).get(no)
+            c = next((x for x in self.hand + self.drop + self.deck if x.d["no"] == no), None)
+            if sp not in ids and c is not None:
+                sp = self.ai_spot(c, [x for x in ids if x != "cancel"])
+            return ([sp], f"{self.NMS.get(sp, sp)}に置きます") if sp in ids else None
+        if kind == "attack":
+            for sp in ("FL", "V", "FR", "BC"):
+                if sp in ids:
+                    return [sp], "前列左 → ヴァンガード → 前列右 → 中央後列の順(先のドライブのトリガーを後のアタックに乗せる)"
+            return ["end"], "アタックできるユニットはもういません"
+        if kind == "boost":
+            return ["yes"], "ブーストできる時はブーストします"
+        if kind == "eliz_bc":
+            return ["yes"], "エネルギーが2あれば使います(クリティカル+1)"
+        if kind == "ryuji":
+            return ["yes"], "相手の前列を退却させてからスタンドして、もう一度アタックします"
+        if kind == "pharos":
+            ok = len(self.hand) <= 6 and len(self.deck) > self.DECK_SAFE
+            return (["yes"], "手札が6枚以下なら引きます") if ok else (["no"], "手札が多い・山札が少ないので置きません")
+        if kind == "sent_cost":
+            i = min(range(len(self.hand)), key=lambda j: self.guard_cost(self.hand[j]))
+            return [str(i)], f"{cname(self.hand[i])}を捨てます(一番価値の低いカード)"
+        if kind == "over_call":
+            g2 = [(j, c) for j, c in enumerate(self.hand) if c.kind == "unit" and c.grade == 2 and not self.is_g3(c) and str(j) in ids]
+            if g2 and self.free_front():
+                j, c = max(g2, key=lambda jc: self.unit_score(jc[1])); return [str(j)], f"{cname(c)}を前列にコールします"
+            g1 = [(j, c) for j, c in enumerate(self.hand) if c.kind == "unit" and c.grade == 1 and str(j) in ids]
+            if g1 and self.free_back():
+                j, c = max(g1, key=lambda jc: self.back_score(jc[1], self.free_back())); return [str(j)], f"{cname(c)}を後列にコールします"
+            return ["none"], "コールしません"
+        return None
+
 
     def go_auto(self):
         self.__class__ = AutoHuman
@@ -108,11 +264,9 @@ class HumanPlayer(PersonaPlayer):
                 if disc.d["extra"].get("discard_search"):
                     kind = disc.d["extra"]["discard_search"]
                     if kind == "persona_ability":
-                        k = self.look_top(7, lambda x: bool(x.persona), self.unit_score)
+                        self.pick_top7(f"{cname(disc)}:山札の上7枚からペルソナ能力を持つカードを1枚まで手札に加えます", lambda x: bool(x.persona), score=self.unit_score)
                     else:
-                        k = self.look_top(7, lambda x: "velvet" in x.tags, lambda x: 1 if x.no == "024" else 0)
-                    if k:
-                        self.hand.append(k); self.L("ライドコストで", disc, "→", k)
+                        self.pick_top7(f"{cname(disc)}:山札の上7枚からベルベットルームの住人を1枚まで手札に加えます", lambda x: "velvet" in x.tags, score=lambda x: 1 if x.no == "024" else 0)
             else:
                 disc = None
             self.soul.append(self.vg)
@@ -128,10 +282,9 @@ class HumanPlayer(PersonaPlayer):
             elif self.v_grade == 2:
                 self.place_marker(self.arc(self.vg))
                 need_g3 = not any(self.is_g3(h) for h in self.hand)
-                k = self.look_top(7, lambda x: x.kind == "unit" and (need_g3 or not self.is_g3(x)),
-                                  lambda x: 99999 if (need_g3 and self.is_g3(x)) else self.unit_score(x) + (5000 if x.grade == 2 else 0))
-                if k:
-                    self.hand.append(k)
+                k = self.pick_top7("G2主人公:山札の上7枚からユニットを1枚まで手札に加えます" + ("" if need_g3 else "(G3は手札にあるので選べません)"),
+                                   lambda x: x.kind == "unit" and (need_g3 or not self.is_g3(x)),
+                                   score=lambda x: 99999 if (need_g3 and self.is_g3(x)) else self.unit_score(x) + (5000 if x.grade == 2 else 0))
                 self.L("  G2主人公:山札7枚から", self.short(k) if k else "なし")
             elif self.v_grade == 3:
                 self.place_marker(self.arc(self.vg))
@@ -322,12 +475,27 @@ class HumanPlayer(PersonaPlayer):
         picks = []
         if team:
             opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade} パワー{c.power}") for c in team] + [dict(id="none", label="選ばない")]
+            onb = {u.card.name for u in self.units()}
+            tm = [c for c in team if c.kind == "unit" and not self.is_g3(c)]
+            tm = [c for c in tm if c.name not in onb] or tm
+            if tm:
+                b = max(tm, key=self.unit_score)
+                self.hint(([f"t{top.index(b)}"], f"{cname(b)}(盤面にいない名前で、アタッカーとして一番強いユニット)"))
             a = self.ask("act1_pick", "G3の【起】:チームのユニットを1枚まで選んでください", opts, desc=f"山札の上7枚:{names}")
             if a != "none":
                 picks.append(top[int(a[1:])])
         sec = [c for c in top if sec_tag(c) and c not in picks]
         if sec:
             opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade} パワー{c.power}") for c in sec] + [dict(id="none", label="選ばない")]
+            bce = self.circles["BC"] and self.circles["BC"].card.d["extra"].get("elizabeth")
+            def s2(c):
+                if c.d["extra"].get("elizabeth") and self.key in ("P3", "P3P"):
+                    return 50 if not bce else 5
+                if getattr(self, "focus_th", False) and "タナトス" not in self.vgauge and c.no in ("010", "064"):
+                    return 60 if (c.no == "010" and self.arcana["死神"] >= 3) else 30
+                return 10 + (5 if c.on_call else 0)
+            b = max(sec, key=s2)
+            self.hint(([f"t{top.index(b)}"], f"{cname(b)}" + ("(中央後列のアタッカー)" if b.d["extra"].get("elizabeth") and self.key in ("P3", "P3P") else "(登場時の効果を持つカードを優先)")))
             a = self.ask("act1_pick", "G3の【起】:ベルベットルームの住人か協力者を1枚まで選んでください", opts, desc=f"山札の上7枚:{names}")
             if a != "none":
                 picks.append(top[int(a[1:])])
@@ -353,10 +521,12 @@ class HumanPlayer(PersonaPlayer):
     MANUAL_EFF = ("takemi", "togo", "morgana", "cb_draw", "yukiko", "eb1_lock", "sae", "chie_search", "nanako", "marie", "fushimi")
     ONCE_EFF = ("takemi", "togo", "eb1_lock", "sae", "nanako", "marie", "fushimi")
 
-    def yes_no(self, title, yes, no="使わない", desc="", sub=""):
+    def yes_no(self, title, yes, no="使わない", desc="", sub="", ai=None):
+        if ai is not None:
+            self.hint(([("yes" if ai[0] else "no")], ai[1]))
         return self.ask("eff_yn", title, [dict(id="yes", label=yes, sub=sub), dict(id="no", label=no)], desc=desc) == "yes"
 
-    def pick_top7(self, title, pred, desc=""):
+    def pick_top7(self, title, pred, desc="", score=None):
         """山札の上7枚を見て、条件に合うカードを1枚まで選ぶ(選んだカードを返す。山札はシャッフル)"""
         top = list(reversed(self.deck[-7:]))
         names = "、".join(cname(c) for c in top) or "なし"
@@ -368,6 +538,9 @@ class HumanPlayer(PersonaPlayer):
             if c.d["no"] not in seen:
                 seen.append(c.d["no"]); opts.append(self.opt_card(c, f"t{top.index(c)}", f"G{c.grade}" + (" 守護者" if c.kind == "sentinel" else "")))
         opts.append(dict(id="none", label="選ばない"))
+        if score is not None:
+            best = max(cands, key=score)
+            self.hint(([f"t{top.index(best)}"], f"{cname(best)}(ふだんのAIの評価が一番高いカード)"))
         k = self.ask("eff_pick", title, opts, desc=(desc + " " if desc else "") + f"山札の上7枚:{names}")
         if k == "none":
             self.rng.shuffle(self.deck); return None
@@ -381,6 +554,9 @@ class HumanPlayer(PersonaPlayer):
         if not cands:
             return False
         nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
+        fr = [k for k in cands if k in ("FL", "FR")] or cands
+        best = max(fr, key=lambda k: (opp.circles[k].rest, opp.circles[k].card.power))
+        self.hint(([best], "アタックしてレストしている前列(次のターンにスタンドできなくなる)を優先します"))
         opts = [dict(id=k, label=f"{nm[k]} {cname(opp.circles[k].card)}", no=opp.circles[k].card.d["no"],
                      sub=("レスト中:次のターンもスタンドできない" if opp.circles[k].rest else "スタンド中:インターセプトできなくなる")) for k in cands]
         k = self.ask("eff_pick", "相手のリアガードを1枚選んでください(次の相手のターン終了時まで、インターセプトできずスタンドもできない)", opts)
@@ -401,7 +577,9 @@ class HumanPlayer(PersonaPlayer):
         a = self.arcana[self.arc(u.card)] if self.arc(u.card) else 0
         sn = cname(u.card)
         if eff == "cb_draw":
-            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1で1枚引きますか?", "CB1で1枚引く", sub=f"表のダメージ {self.cb_avail()}枚"):
+            use = self.cb_avail() >= 2 or (self.cb_avail() >= 1 and self.act1_turn == self.turn)
+            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1で1枚引きますか?", "CB1で1枚引く", sub=f"表のダメージ {self.cb_avail()}枚",
+                                                   ai=(use, "表のダメージが2枚以上(G3の【起】の分を残せる)なら引きます" if use else "表のダメージが1枚なので、G3の【起】のために残します")):
                 self.pay_cb(1); self.draw(1)
             return
         if eff == "yukiko":
@@ -410,6 +588,9 @@ class HumanPlayer(PersonaPlayer):
                 return
             nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
             opts = [dict(id=k, label=f"{nm[k]} {cname(x.card)}", no=x.card.d["no"]) for k, x in others]
+            bad = [k for k, x in others if x.locked or x.doomed]
+            tk = bad[0] if bad else min(others, key=lambda kx: self.unit_score(kx[1].card))[0]
+            self.hint(([tk], "ロックされた・弱いユニットに与えます(次のターンに役立たないユニットを手札1枚に替える)"))
             k = self.ask("eff_pick", f"{sn}:ユニットを1枚選び、『ターン終了時、このユニットを退却させて1枚引く』を与えます", opts,
                          desc="与えたユニットは、ターン終了時に退却させて1枚引くかどうかを選べます。")
             self.circles[k].end_draw_retire = True
@@ -417,7 +598,8 @@ class HumanPlayer(PersonaPlayer):
             return
         if eff == "eb1_lock":
             if opp and self.energy >= 1 and any(opp.circles.get(k) for k in ("FL", "FR", "BL", "BC", "BR")) \
-                    and self.yes_no(f"{sn}:エネルギー1で相手のリアガード1枚をロックしますか?", "EB1でロックする", sub=f"エネルギー {self.energy}"):
+                    and self.yes_no(f"{sn}:エネルギー1で相手のリアガード1枚をロックしますか?", "EB1でロックする", sub=f"エネルギー {self.energy}",
+                                    ai=(self.energy >= 3, "エネルギーが3以上あればロックします" if self.energy >= 3 else "エネルギーが少ないのでスキル用に残します")):
                 self.pay_eb(1); self.lock_pick(opp)
                 if a >= 3 and u.card.no == "093":
                     self.ec(2)
@@ -427,7 +609,8 @@ class HumanPlayer(PersonaPlayer):
                 return
             want_g3 = a >= 3
             what = "主人公のG3" if want_g3 else "明智 吾郎"
-            if not self.yes_no(f"{sn}:カウンターブラスト1で山札から{what}を探しますか?", "CB1で探す", sub=f"表のダメージ {self.cb_avail()}枚"):
+            if not self.yes_no(f"{sn}:カウンターブラスト1で山札から{what}を探しますか?", "CB1で探す", sub=f"表のダメージ {self.cb_avail()}枚",
+                               ai=(self.cb_avail() >= 2, "表のダメージが2枚以上なら探します" if self.cb_avail() >= 2 else "表のダメージが1枚なので残します")):
                 return
             k = self.search_deck(lambda x: (self.is_g3(x) if want_g3 else x.no == "020"), lambda x: 0)
             self.pay_cb(1)
@@ -435,21 +618,31 @@ class HumanPlayer(PersonaPlayer):
                 self.hand.append(k); self.L("  冴:", cname(k), "を手札に")
             return
         if eff == "chie_search":
+            need_sent = not any(x.kind == "sentinel" for x in self.hand)
+            need_g3 = not any(self.is_g3(x) for x in self.hand)
+            def csc(x):
+                if self.is_g3(x): return 2_000_000 if need_g3 else -2_000_000
+                if x.kind == "sentinel": return 1_000_000 if need_sent else -1_000_000
+                return self.unit_score(x)
             c = self.pick_top7(f"{sn}:山札の上7枚から〈自称特別捜査隊〉を1枚まで手札に加えます",
                                lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name,
-                               desc="主人公のG3や守護者(りせ)も選べます。")
+                               desc="主人公のG3や守護者(りせ)も選べます。", score=csc)
             if not c:
                 return
-            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1しますか?", "CB1する", no="しない(手札1枚をソウルに置く)", sub=f"表のダメージ {self.cb_avail()}枚"):
+            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1しますか?", "CB1する", no="しない(手札1枚をソウルに置く)", sub=f"表のダメージ {self.cb_avail()}枚",
+                                                   ai=(self.cb_avail() >= 2, "表のダメージが2枚以上ならCB1" if self.cb_avail() >= 2 else "CBを残して手札をソウルへ")):
                 self.pay_cb(1)
             elif self.hand:
                 opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)]
+                jj = min(range(len(self.hand)), key=lambda q: self.card_value(self.hand[q]))
+                self.hint(([str(jj)], f"{cname(self.hand[jj])}(手札の中で一番いらないカード)"))
                 j = int(self.ask("eff_soul", f"{sn}:手札から1枚選んでソウルに置いてください", opts))
                 x = self.hand.pop(j); self.soul.append(x); self.L("  千枝:", cname(x), "をソウルへ")
             return
         if eff == "nanako":
             self.pick_top7(f"{sn}:山札の上7枚から「主人公」「花村 陽介」「クマ」のユニットを1枚まで手札に加えます",
-                           lambda x: x.kind == "unit" and (self.is_g3(x) or x.no in ("012", "040")))
+                           lambda x: x.kind == "unit" and (self.is_g3(x) or x.no in ("012", "040")),
+                           score=lambda x: 2 if self.is_g3(x) and not any(self.is_g3(h) for h in self.hand) else (1 if x.no == "012" else 0))
             return
         if eff == "marie":
             gs = [(k, x) for k, x in self.circles.items() if x and x.gauge]
@@ -457,6 +650,8 @@ class HumanPlayer(PersonaPlayer):
                 return
             nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
             opts = [dict(id=k, label=f"{nm[k]} {cname(x.card)}", no=x.card.d["no"], sub=f"「{self.arc(x.card)}」{self.arcana[self.arc(x.card)]}つ → +1") for k, x in gs]
+            bk = max(gs, key=lambda kx: self.arcana[self.arc(kx[1].card)] if self.arcana[self.arc(kx[1].card)] < 3 else -1)[0]
+            self.hint(([bk], "3つに一番近いアルカナを増やします(3つで転生)"))
             k = self.ask("eff_pick", f"{sn}:ペルソナゲージを持つリアガードを1枚選び、そのアルカナのマーカーを1つ置きます", opts)
             self.place_marker(self.arc(self.circles[k].card))
             return
@@ -465,6 +660,11 @@ class HumanPlayer(PersonaPlayer):
                 return
             triple = a >= 3 and self.v_grade >= 3
             opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)] + [dict(id="none", label="使わない")]
+            if len(self.hand) >= 2:
+                jj = min(range(len(self.hand)), key=lambda q: self.card_value(self.hand[q]))
+                self.hint(([str(jj)], f"{cname(self.hand[jj])}をソウルへ(一番いらないカード)"))
+            else:
+                self.hint((["none"], "手札が1枚なので使いません"))
             j = self.ask("eff_soul", f"{sn}:手札を1枚ソウルに置いて" + ("ヴァンガードをトリプルドライブにしますか?(正義3つ)" if triple else "1枚引きますか?"), opts)
             if j == "none":
                 return
@@ -481,6 +681,9 @@ class HumanPlayer(PersonaPlayer):
             if not cands:
                 self.rng.shuffle(self.deck); self.L("  モルガナ:山札の上5枚に対象なし"); return
             opts = [self.opt_card(c, f"t{top.index(c)}", f"G{c.grade}" + (" 守護者" if c.kind == "sentinel" else "")) for c in cands] + [dict(id="none", label="選ばない")]
+            ns = not any(c.kind == "sentinel" for c in self.hand); ng = not any(self.is_g3(c) for c in self.hand)
+            b = max(cands, key=lambda x: (2_000_000 if ng else -2_000_000) if self.is_g3(x) else ((1_000_000 if ns else -1_000_000) if x.kind == "sentinel" else self.unit_score(x)))
+            self.hint(([f"t{top.index(b)}"], f"{cname(b)}" + ("(手札にG3がない)" if self.is_g3(b) else "(手札に守護者がない)" if b.kind == "sentinel" else "")))
             k = self.ask("eff_pick", "モルガナ:山札の上5枚から〈心の怪盗団〉を1枚まで手札に加えます", opts, desc=f"山札の上5枚:{names}。加えたら手札を1枚ソウルに置きます。")
             if k == "none":
                 self.rng.shuffle(self.deck); return
@@ -488,6 +691,8 @@ class HumanPlayer(PersonaPlayer):
             self.deck.remove(c); self.rng.shuffle(self.deck); self.hand.append(c)
             self.L("  モルガナ:", cname(c), "を手札に")
             opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)]
+            jj = min(range(len(self.hand)), key=lambda q: self.card_value(self.hand[q]))
+            self.hint(([str(jj)], f"{cname(self.hand[jj])}(一番いらないカード)"))
             j = int(self.ask("eff_soul", "モルガナ:手札から1枚選んでソウルに置いてください", opts))
             x = self.hand.pop(j); self.soul.append(x); self.L("  モルガナ:", cname(x), "をソウルへ")
         elif eff == "takemi":
@@ -500,6 +705,13 @@ class HumanPlayer(PersonaPlayer):
                 if k in cands and k.d["no"] not in seen:
                     seen.append(k.d["no"]); opts.append(self.opt_card(k, f"d{j}", f"G{k.grade} パワー{k.power}"))
             opts.append(dict(id="none", label="使わない"))
+            spot0 = self.free_front() or (self.free_back() if cands and cands[0].grade == 1 else None)
+            if spot0 and (a >= 3 or len(self.soul) >= 2):
+                b = max(cands, key=self.unit_score)
+                j = next(j for j, k in enumerate(self.drop) if k.d["no"] == b.d["no"])
+                self.hint(([f"d{j}"], f"{cname(b)}(一番強いユニット)を空いているサークルに"))
+            else:
+                self.hint((["none"], "空いているサークルがない・ソウルが少ないので使いません"))
             pick = self.ask("eff_pick", "武見:ドロップから〈心の怪盗団〉をコールしますか?" + ("(死神3つ:コストなし)" if a >= 3 else "(SB1)"), opts)
             if pick == "none":
                 return
@@ -540,7 +752,7 @@ class HumanPlayer(PersonaPlayer):
         for k, u in list(self.circles.items()):
             if u and u.end_draw_retire and not u.doomed:
                 if not self.yes_no(f"ターン終了時:{nm[k]}の{cname(u.card)}を退却させて1枚引きますか?(雪子の効果)", "退却させて1枚引く", no="残す",
-                                   desc=f"手札 {len(self.hand)}枚・山札 {len(self.deck)}枚"):
+                                   desc=f"手札 {len(self.hand)}枚・山札 {len(self.deck)}枚", ai=(True, "ふだんのAIはいつも退却させて1枚引きます")):
                     u.end_draw_retire = False
         return super().end_phase(o)
 
@@ -625,6 +837,29 @@ class HumanPlayer(PersonaPlayer):
         elif ex == "retire":
             opp.retire_one()
 
+    def skill_hint(self, opts, key, atk, remaining):
+        """ふだんのAIが使うスキル(盤面のコピーでAIに選ばせて、同じものを探す)"""
+        import copy as _copy, re as _re
+        pc = self.shadow()
+        ac = _copy.deepcopy(atk)
+        if key == "V":
+            pc.use_vg_skill(pc.opp, ac, list(remaining or []))
+        else:
+            ac.attacker = pc.circles[key]
+            pc.use_skill(pc.circles[key], pc.opp, ac)
+        line = next((l for l in pc.log if isinstance(l, str) and "スキル(" in l), None)
+        if not line:
+            return ["none"], "条件が合わないので使いません(エネルギーやソウルを温存)"
+        m = _re.search(r"スキル\((.+?)\) ([A-Za-z_]+?)(\d+)", line)
+        if not m:
+            return None
+        kind, n = m.group(2), int(m.group(3))
+        txt = line.split(") ", 1)[-1]
+        for i, o in enumerate(opts):
+            if o[1] == kind and o[2] == n and (not EX_JP.get(o[4]) or EX_JP.get(o[4]) in txt):
+                return [str(i)], f"{o[5]}(相手のダメージ・残りのエネルギーやソウルから、一番効果が大きいもの)"
+        return None
+
     def use_skill(self, u, opp, atk):
         if not u.gauge:
             return
@@ -635,6 +870,8 @@ class HumanPlayer(PersonaPlayer):
         opts = self.skill_options(sk, opp)
         if not opts:
             return
+        key = next((k for k, x in self.circles.items() if x is u), None)
+        self.hint(lambda: self.skill_hint(opts, key, atk, None))
         a = self.ask("skill", f"{cname(u.card)}のアタック:ペルソナの〔スキル〕を1つ選んで使います",
                      [dict(id=str(i), label=o[5]) for i, o in enumerate(opts)] + [dict(id="none", label="使わない")])
         if a == "none":
@@ -651,6 +888,7 @@ class HumanPlayer(PersonaPlayer):
         opts = self.skill_options(sk, opp, vg=True)
         if not opts:
             return
+        self.hint(lambda: self.skill_hint(opts, "V", atk, remaining))
         a = self.ask("skill", "ヴァンガードのアタック:ペルソナの〔スキル〕を1つ選んで使います",
                      [dict(id=str(i), label=o[5]) for i, o in enumerate(opts)] + [dict(id="none", label="使わない")])
         if a == "none":
@@ -809,9 +1047,19 @@ class HumanPlayer(PersonaPlayer):
         for o in opts:
             if o["id"] == cur:
                 o["sub"] = "今アタック中"
+        rem = [x for x in ("FL", "V", "FR", "BC") if x in getattr(self, "_trig_rem", [])]
+        now = self.opp.damage >= 4 or not rem
+        nxt = rem[0] if rem else None
+        if "クリティカル+1" in title:
+            tgt = cur if (now or self.opp.damage >= 3 or nxt is None) else nxt
+        else:
+            tgt = cur if (now or nxt is None) else nxt
+        why = ("今のアタックに乗せます" + ("(相手が4点以上・最後のアタック)" if now else "(相手が3点以上なのでクリティカルは今)")) if tgt == cur else f"まだアタックしていない{self.NMS.get(tgt, tgt)}に乗せて、次のアタックを通しやすくします"
+        self.hint(([tgt], why))
         return self.ask("trigger", title, opts)
 
     def apply_trigger(self, opp, c, atk, remaining, pend, plan, idx):
+        self._trig_rem = [s0 for s0, _ in remaining]
         t = c.trig
         cur = getattr(self, "cur_spot", "V")
 
@@ -841,6 +1089,8 @@ class HumanPlayer(PersonaPlayer):
             cands = [k for k in ("FL", "FR", "BC") if self.circles[k] and not self.circles[k].rest]
             if cands:
                 opts = [dict(id=k, label=cname(self.circles[k].card), no=self.circles[k].card.d["no"]) for k in cands] + [dict(id="none", label="選ばない")]
+                rem = [x for x in ("FL", "FR", "BC") if x in self._trig_rem and x in cands]
+                self.hint(([rem[0]], "次にアタックするリアガードをスタンドさせて、もう一度アタックします") if rem else (["none"], "1枚引いて手札からコールします"))
                 k = self.ask("over", "オーバートリガー:アタックしたバトル終了時にスタンドするリアガードを選んでください", opts)
                 if k != "none":
                     self.restand.add(k)
@@ -875,6 +1125,48 @@ class HumanPlayer(PersonaPlayer):
                     self.drop.append(self.dmg_zone.pop()[0]); self.L("  ヒール:1点回復")
 
     # ------------------------------------------------------------ ガード
+    def guard_hint(self, atk, attacker, defense):
+        """ふだんのAI(自己学習したガードの判断)ならどうガードするか"""
+        items = PersonaPlayer.guard_items(self, atk)
+        self.cur_rem = self.remaining_attacks(attacker, atk)
+        hit = self.damage + atk.crit
+        lethal = hit >= 6
+        passes = atk.drives if lethal else (min(self.PASS5, atk.drives) if hit >= 5 and atk.drives else 0)
+        need = atk.power - defense + 1 + passes * 10000
+        need0 = atk.power - defense + 1
+        try:
+            import learn_ai
+            if hit >= 2:
+                opts, default = learn_ai.guard_options(self, atk, items, need)
+                if len(opts) > 1:
+                    sf = learn_ai.state_features(self, atk)
+                    pr = guard_model()([sf + learn_ai.option_features(self, atk, items, o) for o in opts])
+                    ch, gs = opts[max(range(len(opts)), key=lambda i: pr[i])]
+                else:
+                    ch, gs = default
+            else:
+                ch, gs = PersonaPlayer.base_choose_guard(self, atk, items, need)
+        except Exception:
+            ch, gs = PersonaPlayer.base_choose_guard(self, atk, items, need)
+        if ch == "take":
+            return [], f"ノーガード(受けると{min(hit, 6)}点。手札を次のアタックに残す)"
+        if ch == "sentinel":
+            i = next(i for i, c in enumerate(self.hand) if c.kind == "sentinel")
+            return [f"S{i}"], "守護者で完全ガードします"
+        ids, tot = [], 0
+        for idx in gs:
+            it = items[idx]
+            tot += it[2]
+            if it[0] == "H":
+                i = next((i for i, c in enumerate(self.hand) if c is it[1]), None)
+                if i is not None:
+                    ids.append(f"H{i}")
+            else:
+                ids.append(f"I{it[1]}")
+        mg = tot - need0
+        extra = "(トリガー2枚分多め)" if mg >= 20000 else "(トリガー1枚分多め)" if mg >= 10000 else "(ちょうど止める)"
+        return ids, f"シールド{tot}でガード{extra}"
+
     def _defend(self, atk, attacker):
         self.gzone = []
         defense = self.vg_power()
@@ -884,6 +1176,8 @@ class HumanPlayer(PersonaPlayer):
         if self.key == "P5" and not self.kasumi_used and self.v_grade >= 3 and atk.is_v:
             ks = [c for c in self.drop if c.d["extra"].get("kasumi")]
             if ks:
+                use = self.damage >= 3 or self.damage + atk.crit >= 6
+                self.hint((["yes"], "ダメージ3点以上なのでかすみで受けます") if use else (["no"], "ダメージ2点以下なので温存します"))
                 if self.ask("kasumi", f"かすみ:ドロップからバインドしてヴァンガード+10000しますか?(相手{atk.power} / 自分{defense})",
                             [dict(id="yes", label="バインドする(+10000)", no="052"), dict(id="no", label="しない")]) == "yes":
                     self.drop.remove(ks[0]); self.bind.append(ks[0]); self.kasumi_used = True
@@ -927,6 +1221,7 @@ class HumanPlayer(PersonaPlayer):
                     attacker_no=(attacker.vg.d["no"] if atk.is_v and hasattr(attacker, "vg") else (atk.attacker.card.d["no"] if atk.attacker else "")))
         if not opts:
             return 0
+        self.hint(lambda: self.guard_hint(atk, attacker, defense))
         pick = self.ask("guard", f"ガード:相手のアタック {atk.power}(☆{atk.crit}" + (f"・ドライブ{atk.drives}" if atk.drives else "") + f")/ 自分 {defense}",
                         opts, multi=True, desc=f"止めるにはシールド{need}以上(5000単位なら{-(-need // 5000) * 5000})。何も選ばなければノーガード。", extra=info)
         pick = list(pick)

@@ -277,6 +277,16 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
 #over h2 small{display:block;font:400 18px/1.5 var(--disp);letter-spacing:.1em;text-shadow:none;color:var(--text);margin-top:6px}
 #over.lose h2{color:#c9ced9;text-shadow:4px 4px 0 #333,8px 8px 0 #000}
 #menu .box{padding:16px;gap:8px}
+/* AIのおすすめ */
+.aih{display:flex;align-items:flex-start;gap:8px;background:rgba(255,207,61,.1);border:1px solid rgba(255,207,61,.45);border-left:4px solid var(--gold);padding:5px 8px;font-size:12.5px;line-height:1.5;color:var(--text)}
+.aih b{flex:none;font:italic 700 11px/1.6 var(--en);letter-spacing:.12em;color:#000;background:var(--gold);padding:0 6px;transform:skewX(-12deg)}
+.aih .t{flex:1;min-width:0}
+.aih .t strong{color:#fff}
+.aih button{flex:none;font:700 12px/1 var(--body);min-height:32px;padding:0 10px;border:1px solid var(--gold);background:transparent;color:var(--gold);border-radius:3px;cursor:pointer}
+.ob .aib{margin-left:auto;flex:none;font:italic 700 10px/1 var(--en);letter-spacing:.1em;background:var(--gold);color:#000;padding:3px 6px;transform:skewX(-12deg)}
+.ob.airec{border-color:rgba(255,207,61,.7)}
+.tb[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
+.tb#bAi[aria-pressed="true"]{border-color:var(--gold);color:var(--gold)}
 </style>
 </head>
 <body>
@@ -300,6 +310,7 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
     <button class="tb" id="bMenu" type="button">≡</button>
     <span class="t" id="title"></span>
     <button class="tb" id="bUndo" type="button">1手戻す</button>
+    <button class="tb" id="bAi" type="button" aria-pressed="true">AI案</button>
     <button class="tb" id="bLog" type="button">ログ</button>
   </div>
   <div class="body">
@@ -315,6 +326,7 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
       <div class="ev" id="ev"></div>
       <div class="q" id="qt"></div>
       <div class="d" id="qd"></div>
+      <div class="aih" id="aih" hidden></div>
       <div id="opts"></div>
       <div class="confirm" id="conf" hidden><span class="sum" id="sum"></span><button class="ok" id="bOk" type="button">決定</button></div>
     </div>
@@ -338,7 +350,7 @@ const LS = "persona-sim-v1";
 const $ = id => document.getElementById(id);
 let TOK = {};
 fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
-let st = {me:"P5", opp:"P3", first:"rand", ai:"learn", game:null};
+let st = {me:"P5", opp:"P3", first:"rand", ai:"learn", game:null, showAI:true};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
 if (st.ai === "strong") st.ai = "search";
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
@@ -391,7 +403,7 @@ $("bResume").onclick = openGame;
 
 // ---------- 対戦画面
 let cur = null, multiSel = new Set(), busy = false, lastActive = null;
-function openGame() { prevLog = 1e9; lastActive = null; $("start").hidden = true; $("game").hidden = false; sizeCards(); advance(); }
+function openGame() { prevLog = 1e9; lastActive = null; $("bAi").setAttribute("aria-pressed", st.showAI !== false); $("start").hidden = true; $("game").hidden = false; sizeCards(); advance(); }
 function backToStart() { $("game").hidden = true; $("over").hidden = true; $("menu").hidden = true; $("start").hidden = false; renderStart(); }
 let prevLog = 0;
 async function advance() {
@@ -419,6 +431,7 @@ $("bUndo").onclick = $("bOvUndo").onclick = () => {
   if (busy || !st.game || !st.game.answers.length) return;
   st.game.answers.pop(); $("over").hidden = true; prevLog = 1e9; save(); advance();
 };
+$("bAi").onclick = () => { st.showAI = st.showAI === false; save(); $("bAi").setAttribute("aria-pressed", st.showAI !== false); if (cur && cur.status === "ask") renderPanel(cur.q); };
 $("bLog").onclick = $("bOvLog").onclick = () => { renderLog(); $("logsheet").hidden = false; };
 $("bLogClose").onclick = () => $("logsheet").hidden = true;
 $("bMenu").onclick = () => $("menu").hidden = false;
@@ -540,11 +553,22 @@ function renderPanel(q) {
   $("conf").hidden = true;
   if (!q) { $("qt").textContent = "対戦終了"; $("qd").textContent = ""; return; }
   $("qt").textContent = q.title; $("qd").textContent = q.desc || "";
+  const A = st.showAI !== false ? q.ai : null, aiIds = new Set(A ? A.ids.map(String) : []);
+  const ah = $("aih");
+  if (A) {
+    const lab = q.multi ? (A.ids.length ? q.options.filter(o => aiIds.has(String(o.id))).map(o => o.label).join("・") : "何も選ばない") : (q.options.find(o => aiIds.has(String(o.id))) || {}).label || "";
+    let why = A.why || "";
+    const short = lab.replace(/^[^:]*:/, "");
+    for (const x of [lab, short]) if (x && why.startsWith(x)) { why = why.slice(x.length).replace(/^[((]/, "").replace(/[))]$/, ""); break; }
+    ah.innerHTML = `<b>AI</b><span class="t">AIなら <strong>${lab}</strong>${why ? "。" + why : ""}</span>${q.multi ? '<button type="button" id="aiSet">この案にする</button>' : ""}`;
+    ah.hidden = false;
+  } else { ah.hidden = true; ah.innerHTML = ""; }
   // 盤面・手札のハイライトを外す
   document.querySelectorAll(".pick,.sel").forEach(e => e.classList.remove("pick", "sel"));
   for (const o of q.options) {
     const b = document.createElement("button"); b.type = "button"; b.className = "ob" + (["end","none","no","cancel"].includes(String(o.id)) ? " end" : "");
-    b.innerHTML = (o.no ? img(o.no) : "") + `<span><div class="l">${o.label}</div>${o.sub ? `<div class="s">${o.sub}</div>` : ""}</span>`;
+    b.innerHTML = (o.no ? img(o.no) : "") + `<span><div class="l">${o.label}</div>${o.sub ? `<div class="s">${o.sub}</div>` : ""}</span>` + (aiIds.has(String(o.id)) ? '<span class="aib">AI</span>' : "");
+    if (aiIds.has(String(o.id))) b.classList.add("airec");
     const pick = () => q.multi ? toggle(q, o) : answer(o.id);
     b.onclick = pick;
     b.dataset.oid = o.id;
@@ -555,6 +579,10 @@ function renderPanel(q) {
       if (el) { el.classList.add("pick"); el.onclick = ev => { ev.stopPropagation(); pick(); }; el.querySelectorAll("[data-z]").forEach(z => z.onclick = null); if (el.dataset.z) el.onclick = ev => { ev.stopPropagation(); pick(); }; }
     }
   }
+  if (A && q.multi && $("aiSet")) $("aiSet").onclick = () => {
+    multiSel = new Set(); q.options.forEach(o => { if (aiIds.has(String(o.id))) toggle(q, o); });
+    if (!aiIds.size) { document.querySelectorAll("#opts .ob").forEach(b => b.classList.remove("on")); document.querySelectorAll(".sel").forEach(e => e.classList.remove("sel")); updSum(q); }
+  };
   if (q.multi) { $("conf").hidden = false; updSum(q); $("bOk").onclick = () => answer(q.options.filter(o => multiSel.has(String(o.id))).map(o => o.id)); }
 }
 function toggle(q, o) {
