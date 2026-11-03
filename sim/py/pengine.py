@@ -485,6 +485,9 @@ class PersonaPlayer:
     G1_STOP_DMG = 2                                    # G1の時、相手のダメージがこの点数以上なら前列に出さない
     G1_BACK_BC = False                                 # G1の時の後列はヴァンガードの後ろ(中央後列)に置く
     BACK_ORDER = ("BL", "BR", "BC")                    # G1/G2の時に後列を埋める順番
+    TAKE_LAST = 1.0                                    # このターン最後のアタックを受ける時の、ダメージの損の倍率
+    TAKE_ONE = 1.0                                     # 相手のアタックがあと1回残っている時の倍率
+    TAKE_MORE = 1.0                                    # 相手のアタックがあと2回以上残っている時の倍率
     YUKIKO_SMART = False                               # 雪子の付与:相手を選び、ターン終了時の「退却して1枚引く」を必要な時だけ使う
     YUKIKO_HAND = 3                                    # (YUKIKO_SMART時)手札がこの枚数以下なら退却して引く
     BC_G2 = True                                       # G3の時、中央後列にチームのG2を置いてアタックさせる(False:G1を置いてヴァンガードをブースト)
@@ -1945,6 +1948,7 @@ class PersonaPlayer:
                 if need <= 0:
                     return 0
         items = self.guard_items(atk)
+        self.cur_rem = self.remaining_attacks(attacker, atk)
         choice, guard_set = self.choose_guard(atk, items, need)
         return self.apply_guard(choice, items, guard_set)
 
@@ -2008,11 +2012,30 @@ class PersonaPlayer:
                 sent_cost -= self.SENT_SPARE * (len(sents) - 1)     # 守護者が余っているなら使いやすい
         return sent_cost
 
+    def remaining_attacks(self, attacker, atk):
+        """このアタックの後に、相手がこのターンにまだアタックできるユニットの数(スタンドしている前列・中央後列、まだのヴァンガード)"""
+        try:
+            n = 0
+            bc_ok = getattr(attacker, "act1_turn", -1) == getattr(attacker, "turn", -2) and getattr(attacker, "v_grade", 0) >= 3
+            for k in ("FL", "FR") + (("BC",) if bc_ok else ()):
+                u = attacker.circles.get(k)
+                if u and not u.rest and u is not atk.attacker:
+                    n += 1
+            if not atk.is_v and not getattr(attacker, "v_rest", True):
+                n += 1
+            return n
+        except Exception:
+            return 1
+
     def choose_guard(self, atk, items, need):
-        """いつもの判断:ダメージの損・ガードの損・守護者の損を比べて一番小さいもの"""
+        """いつもの判断:ダメージの損・ガードの損・守護者の損を比べて一番小さいもの
+        (このターン最後のアタックならダメージの損を重く、まだアタックが残っていれば軽く見る:先読みAIの判断の集計から)"""
         guard_cost, guard_set = self.knap(items, need)
         sent_cost = self.sentinel_cost()
+        rem = getattr(self, "cur_rem", 1)
         take = self.take_cost(atk.crit)
+        if take < 10 ** 6:
+            take = take * (self.TAKE_LAST if rem == 0 else self.TAKE_MORE if rem >= 2 else self.TAKE_ONE)
         options = [("take", take), ("guard", guard_cost), ("sentinel", sent_cost)]
         choice = min(options, key=lambda x: x[1])[0]
         return choice, guard_set
