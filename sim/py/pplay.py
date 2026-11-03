@@ -350,18 +350,130 @@ class HumanPlayer(PersonaPlayer):
 
 
     # ------------------------------------------------------------ 登場時効果のうち、自分で選ぶもの
-    MANUAL_EFF = ("takemi", "togo", "morgana")
+    MANUAL_EFF = ("takemi", "togo", "morgana", "cb_draw", "yukiko", "eb1_lock", "sae", "chie_search", "nanako", "marie", "fushimi")
+    ONCE_EFF = ("takemi", "togo", "eb1_lock", "sae", "nanako", "marie", "fushimi")
+
+    def yes_no(self, title, yes, no="使わない", desc="", sub=""):
+        return self.ask("eff_yn", title, [dict(id="yes", label=yes, sub=sub), dict(id="no", label=no)], desc=desc) == "yes"
+
+    def pick_top7(self, title, pred, desc=""):
+        """山札の上7枚を見て、条件に合うカードを1枚まで選ぶ(選んだカードを返す。山札はシャッフル)"""
+        top = list(reversed(self.deck[-7:]))
+        names = "、".join(cname(c) for c in top) or "なし"
+        cands = [c for c in top if pred(c)]
+        if not cands:
+            self.rng.shuffle(self.deck); self.L("  山札の上7枚に対象なし"); return None
+        seen, opts = [], []
+        for c in cands:
+            if c.d["no"] not in seen:
+                seen.append(c.d["no"]); opts.append(self.opt_card(c, f"t{top.index(c)}", f"G{c.grade}" + (" 守護者" if c.kind == "sentinel" else "")))
+        opts.append(dict(id="none", label="選ばない"))
+        k = self.ask("eff_pick", title, opts, desc=(desc + " " if desc else "") + f"山札の上7枚:{names}")
+        if k == "none":
+            self.rng.shuffle(self.deck); return None
+        c = top[int(k[1:])]
+        self.deck.remove(c); self.rng.shuffle(self.deck); self.hand.append(c)
+        self.L("  手札に加えた:", cname(c))
+        return c
+
+    def lock_pick(self, opp):
+        cands = [k for k in ("FL", "FR", "BL", "BC", "BR") if opp.circles.get(k) and not opp.circles[k].locked]
+        if not cands:
+            return False
+        nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
+        opts = [dict(id=k, label=f"{nm[k]} {cname(opp.circles[k].card)}", no=opp.circles[k].card.d["no"],
+                     sub=("レスト中:次のターンもスタンドできない" if opp.circles[k].rest else "スタンド中:インターセプトできなくなる")) for k in cands]
+        k = self.ask("eff_pick", "相手のリアガードを1枚選んでください(次の相手のターン終了時まで、インターセプトできずスタンドもできない)", opts)
+        x = opp.circles[k]
+        x.locked = True; x.lock_rest = x.rest
+        opp.L("  ロックされた:", opp.short(x.card), "(レスト中→次のターンもスタンドできない)" if x.rest else "(スタンド中→インターセプトだけできない)")
+        return True
 
     def effect(self, eff, u, circle, opp, in_battle):
         if eff not in self.MANUAL_EFF:
             return super().effect(eff, u, circle, opp, in_battle)
         name = u.card.name
         self.L(f"  登場時効果[{eff}] {self.short(u.card)}")
-        if eff in ("takemi", "togo"):
+        if eff in self.ONCE_EFF:
             if name in self.once:
                 return
             self.once.add(name)
         a = self.arcana[self.arc(u.card)] if self.arc(u.card) else 0
+        sn = cname(u.card)
+        if eff == "cb_draw":
+            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1で1枚引きますか?", "CB1で1枚引く", sub=f"表のダメージ {self.cb_avail()}枚"):
+                self.pay_cb(1); self.draw(1)
+            return
+        if eff == "yukiko":
+            others = [(k, x) for k, x in self.circles.items() if x and x is not u and "team" in x.card.tags and x.card.kind == "unit" and x.card.name != u.card.name]
+            if not others:
+                return
+            nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
+            opts = [dict(id=k, label=f"{nm[k]} {cname(x.card)}", no=x.card.d["no"]) for k, x in others]
+            k = self.ask("eff_pick", f"{sn}:ユニットを1枚選び、『ターン終了時、このユニットを退却させて1枚引く』を与えます", opts,
+                         desc="与えたユニットは、ターン終了時に退却させて1枚引くかどうかを選べます。")
+            self.circles[k].end_draw_retire = True
+            self.L("  雪子:", cname(self.circles[k].card), "に「ターン終了時、退却して1枚引く」を与えた")
+            return
+        if eff == "eb1_lock":
+            if opp and self.energy >= 1 and any(opp.circles.get(k) for k in ("FL", "FR", "BL", "BC", "BR")) \
+                    and self.yes_no(f"{sn}:エネルギー1で相手のリアガード1枚をロックしますか?", "EB1でロックする", sub=f"エネルギー {self.energy}"):
+                self.pay_eb(1); self.lock_pick(opp)
+                if a >= 3 and u.card.no == "093":
+                    self.ec(2)
+            return
+        if eff == "sae":
+            if self.cb_avail() < 1:
+                return
+            want_g3 = a >= 3
+            what = "主人公のG3" if want_g3 else "明智 吾郎"
+            if not self.yes_no(f"{sn}:カウンターブラスト1で山札から{what}を探しますか?", "CB1で探す", sub=f"表のダメージ {self.cb_avail()}枚"):
+                return
+            k = self.search_deck(lambda x: (self.is_g3(x) if want_g3 else x.no == "020"), lambda x: 0)
+            self.pay_cb(1)
+            if k:
+                self.hand.append(k); self.L("  冴:", cname(k), "を手札に")
+            return
+        if eff == "chie_search":
+            c = self.pick_top7(f"{sn}:山札の上7枚から〈自称特別捜査隊〉を1枚まで手札に加えます",
+                               lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name,
+                               desc="主人公のG3や守護者(りせ)も選べます。")
+            if not c:
+                return
+            if self.cb_avail() >= 1 and self.yes_no(f"{sn}:カウンターブラスト1しますか?", "CB1する", no="しない(手札1枚をソウルに置く)", sub=f"表のダメージ {self.cb_avail()}枚"):
+                self.pay_cb(1)
+            elif self.hand:
+                opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)]
+                j = int(self.ask("eff_soul", f"{sn}:手札から1枚選んでソウルに置いてください", opts))
+                x = self.hand.pop(j); self.soul.append(x); self.L("  千枝:", cname(x), "をソウルへ")
+            return
+        if eff == "nanako":
+            self.pick_top7(f"{sn}:山札の上7枚から「主人公」「花村 陽介」「クマ」のユニットを1枚まで手札に加えます",
+                           lambda x: x.kind == "unit" and (self.is_g3(x) or x.no in ("012", "040")))
+            return
+        if eff == "marie":
+            gs = [(k, x) for k, x in self.circles.items() if x and x.gauge]
+            if not gs:
+                return
+            nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
+            opts = [dict(id=k, label=f"{nm[k]} {cname(x.card)}", no=x.card.d["no"], sub=f"「{self.arc(x.card)}」{self.arcana[self.arc(x.card)]}つ → +1") for k, x in gs]
+            k = self.ask("eff_pick", f"{sn}:ペルソナゲージを持つリアガードを1枚選び、そのアルカナのマーカーを1つ置きます", opts)
+            self.place_marker(self.arc(self.circles[k].card))
+            return
+        if eff == "fushimi":
+            if len(self.hand) < 1:
+                return
+            triple = a >= 3 and self.v_grade >= 3
+            opts = [self.opt_card(x, j) for j, x in enumerate(self.hand)] + [dict(id="none", label="使わない")]
+            j = self.ask("eff_soul", f"{sn}:手札を1枚ソウルに置いて" + ("ヴァンガードをトリプルドライブにしますか?(正義3つ)" if triple else "1枚引きますか?"), opts)
+            if j == "none":
+                return
+            x = self.hand.pop(int(j)); self.soul.append(x); self.L("  伏見:", cname(x), "をソウルへ")
+            if triple:
+                self.triple = True; self.L("伏見:トリプルドライブ")
+            else:
+                self.draw(1)
+            return
         if eff == "morgana":
             top = list(reversed(self.deck[-5:]))
             names = "、".join(cname(c) for c in top)
@@ -421,6 +533,16 @@ class HumanPlayer(PersonaPlayer):
             nu = self.call(tgt, spot, "deck", opp)
             if a >= 3:
                 nu.bonus += 5000
+
+    def end_phase(self, o):
+        """雪子が与えた『ターン終了時、退却させて1枚引く』は使うかどうかを選ぶ"""
+        nm = {"FL": "前列左", "FR": "前列右", "BL": "後列左", "BC": "中央後列", "BR": "後列右"}
+        for k, u in list(self.circles.items()):
+            if u and u.end_draw_retire and not u.doomed:
+                if not self.yes_no(f"ターン終了時:{nm[k]}の{cname(u.card)}を退却させて1枚引きますか?(雪子の効果)", "退却させて1枚引く", no="残す",
+                                   desc=f"手札 {len(self.hand)}枚・山札 {len(self.deck)}枚"):
+                    u.end_draw_retire = False
+        return super().end_phase(o)
 
     def _recarm_target(self):
         """リカームを使えるか(対象と空きサークルがあるか)だけ判定。対象と場所は使う時に選ぶ"""
