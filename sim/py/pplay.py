@@ -961,6 +961,25 @@ class HumanPlayer(PersonaPlayer):
             if spot == "end":
                 break
             power, b, bp = est_power(spot)
+            # アタックする相手:ヴァンガードか、相手の前列のリアガード
+            target = "V"
+            orgs = [k for k in ("FL", "FR") if opp.circles.get(k)]
+            if orgs:
+                full = power + bp
+                vp = opp.vg_power()
+                topts = [dict(id="V", label=f"ヴァンガード:{cname(opp.vg)}", no=opp.vg.d["no"], sub=f"パワー{vp}" + ("" if full >= vp else "(ブーストしても届かない)"))]
+                rgp = {}
+                for k in orgs:
+                    u0 = opp.circles[k]; rgp[k] = opp.unit_power(u0, self, k)
+                    topts.append(dict(id=k, label=f"{nm[k]}のリアガード:{cname(u0.card)}", no=u0.card.d["no"],
+                                      sub=f"パワー{rgp[k]}" + ("(ヒットすると退却)" if full >= rgp[k] else "(届かない)")))
+                reach = [k for k in orgs if full >= rgp[k]]
+                if full < vp and reach:
+                    best = max(reach, key=lambda k: (opp.unit_score(opp.circles[k].card), rgp[k]))
+                    self.hint(([best], "ヴァンガードには届かないので、届くリアガードを退却させて相手のアタッカーを減らします"))
+                else:
+                    self.hint((["V"], "ヴァンガードにアタックしてダメージを与えます" if full >= vp else "どこにも届きませんが、ドライブチェックのトリガー次第でヴァンガードに届きます"))
+                target = self.ask("target", f"{nm[spot]}でアタックする相手を選んでください", topts)
             power -= self.pend.get(spot, (0, 0))[0]
             boosted = False
             if bp:
@@ -1016,7 +1035,10 @@ class HumanPlayer(PersonaPlayer):
             if boosted and circ[b]:
                 circ[b].rest = True
             self.cur_spot = spot
-            res = self.resolve(opp, atk, remaining, self.pend, [], 0)
+            if target != "V" and opp.circles.get(target):
+                res = self.resolve_rg(opp, atk, remaining, self.pend, target)
+            else:
+                res = self.resolve(opp, atk, remaining, self.pend, [], 0)
             opp.gzone = []
             if res is not None:
                 return res
@@ -1033,6 +1055,29 @@ class HumanPlayer(PersonaPlayer):
             if self.deckout or not self.deck:
                 self.deck_empty_check()
                 return opp
+        return None
+
+    def resolve_rg(self, opp, atk, remaining, pend, k):
+        """相手のリアガードへのアタック(相手AIはリアガードへのアタックをガードしない)。ヒットしたら退却"""
+        u = opp.circles[k]
+        self.L("アタック", "V" if atk.is_v else atk.attacker.card, atk.power, f"ドライブ{atk.drives}", "→ 相手のリアガード", cname(u.card))
+        for _ in range(atk.drives):
+            c = self.take_top()
+            if c is None:
+                return opp
+            self.hand.append(c)
+            self.L("  ドライブチェック:", self.short(c))
+            if c.kind == "trigger":
+                self.apply_trigger(opp, c, atk, remaining, pend, [], 0)
+            if self.deckout:
+                self.deck_empty_check()
+                return opp
+        tp = opp.unit_power(u, self, k)
+        if atk.power >= tp and opp.circles.get(k) is u:
+            opp.drop.append(u.card); opp.circles[k] = None
+            self.L(f"  → 最終パワー{atk.power if atk.power < 10**7 else '1億+'} 相手のリアガード{tp} ヒット:{cname(u.card)}を退却")
+        else:
+            self.L(f"  → 最終パワー{atk.power} 相手のリアガード{tp} 届かず")
         return None
 
     def trigger_target(self, title, include_current=True):
@@ -1424,6 +1469,9 @@ ROLLOUT_ERRORS = []
 def vbon(p):
     out = []
     if not getattr(p, "in_turn", False):
+        # 相手のターン中:ダメージチェックのトリガー・かすみなどで上がった分(表示用。パワーにはすでに入っている)
+        if 0 < p.v_temp < 10 ** 7:
+            out.append(["このターン", p.v_temp, True])
         return out
     if p.persona_this_turn:
         out.append(["ペルソナライド", 10000])
@@ -1457,7 +1505,7 @@ def snap(p, hide_hand=False):
             circ[k] = {"n": short_name(u.card), "g": u.gauge or "", "p": min(pw, 10 ** 9), "bon": bon, "gr": u.card.grade,
                        "no": u.card.d["no"], "r": u.rest, "lk": bool(u.locked), "dm": bool(u.doomed)}
     d = {"name": p.key, "vg": short_name(p.vg) if p.v_grade >= 3 else f"G{p.v_grade}主人公",
-         "vgr": p.v_grade, "vp": min(p.vg_power() + sum(b[1] for b in vbon(p)), 10 ** 9), "vbon": vbon(p), "c": circ,
+         "vgr": p.v_grade, "vp": min(p.vg_power() + sum(b[1] for b in vbon(p) if len(b) < 3), 10 ** 9), "vbon": [b[:2] for b in vbon(p)], "c": circ,
          "vno": p.vg.d["no"], "vr": p.v_rest, "vg_g": list(p.vgauge),
          "dmg": [[short_name(c), f, c.d["no"]] for c, f in p.dmg_zone], "soul": len(p.soul), "en": p.energy,
          "deck": len(p.deck), "drop": len(p.drop), "dropno": [c.d["no"] for c in p.drop], "arc": dict(p.arcana),

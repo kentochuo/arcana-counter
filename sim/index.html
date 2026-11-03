@@ -287,6 +287,7 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
 .ob.airec{border-color:rgba(255,207,61,.7)}
 .tb[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
 .tb#bAi[aria-pressed="true"]{border-color:var(--gold);color:var(--gold)}
+.vb{position:absolute;left:50%;bottom:calc(2px + 1.5em);transform:translateX(-50%);font:700 8.5px/1.3 var(--body);background:rgba(0,0,0,.85);color:var(--gold);border:1px solid rgba(255,207,61,.55);padding:0 3px;white-space:nowrap;z-index:3;pointer-events:none;max-width:140%;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body>
@@ -463,6 +464,7 @@ function linkFor(q, o) {
   if (k === "main" && id.startsWith("call:")) return {hand: +id.slice(5)};
   if (k === "call_spot" && SLOTN[id]) return {slot: id};
   if (k === "attack" && SLOTN[id]) return {slot: id};
+  if (k === "target" && SLOTN[id]) return {oslot: id};
   if (k === "trigger" && SLOTN[id]) return {slot: id};
   if (k === "over" && SLOTN[id]) return {slot: id};
   if (k === "guard") { if (id[0] === "H" || id[0] === "S") return {hand: +id.slice(1)}; if (id[0] === "I") return {slot: id.slice(1)}; }
@@ -482,7 +484,8 @@ function mat(p, who, q) {
       cls += p.vr ? " rest" : "";
       const up = p.vbon && p.vbon.length;
       const g = (p.vg_g || []).join("・");
-      inner = `${em}<div class="cardw" data-z="${p.vno}">${img(p.vno)}</div>${g ? `<span class="gg">${g}</span>` : ""}<span class="pw${up ? " up" : ""}">${fmt(p.vp)}</span>`;
+      const vb = (p.vbon || []).map(([l, v]) => `${l}+${v >= 1e7 ? "1億" : (v / 10000) + "万"}`).join(" ");
+      inner = `${em}<div class="cardw" data-z="${p.vno}">${img(p.vno)}</div>${g ? `<span class="gg">${g}</span>` : ""}${vb ? `<span class="vb">${vb}</span>` : ""}<span class="pw${up ? " up" : ""}" title="${vb}">${fmt(p.vp)}</span>`;
     } else {
       const u = p.c[k];
       if (u) {
@@ -490,7 +493,7 @@ function mat(p, who, q) {
         inner = `${em}<div class="cardw" data-z="${u.no}">${img(u.no)}</div>${u.g ? `<span class="gg">${u.g}</span>` : ""}<span class="pw${u.bon && u.bon.length ? " up" : ""}">${fmt(u.p)}</span>${u.lk ? '<span class="lk"></span>' : ""}`;
       } else inner = em;
     }
-    f += `<div class="${cls}" data-slot="${isMe ? k : ""}" aria-label="${SLOTN[k]}">${inner}</div>`;
+    f += `<div class="${cls}" data-slot="${isMe ? k : ""}" data-oslot="${isMe ? "" : k}" aria-label="${SLOTN[k]}">${inner}</div>`;
   }
   const dm = [];
   for (let i = 0; i < 6; i++) { const d = p.dmg[i]; dm.push(d ? `<span class="dc ${d[1] ? "up" : "down"}" data-z="${d[2]}">${img(d[2])}<i>${i + 1}</i></span>` : `<span class="dc${i === 5 ? " d6" : ""}"><i>${i + 1}</i></span>`); }
@@ -575,7 +578,7 @@ function renderPanel(q) {
     opts.appendChild(b);
     const ln = linkFor(q, o);
     if (ln) {
-      const el = ln.hand !== undefined ? document.querySelector(`.hc[data-hand="${ln.hand}"]`) : document.querySelector(`#matMe .slot[data-slot="${ln.slot}"]`);
+      const el = ln.hand !== undefined ? document.querySelector(`.hc[data-hand="${ln.hand}"]`) : ln.oslot ? document.querySelector(`#matOpp .slot[data-oslot="${ln.oslot}"]`) : document.querySelector(`#matMe .slot[data-slot="${ln.slot}"]`);
       if (el) { el.classList.add("pick"); el.onclick = ev => { ev.stopPropagation(); pick(); }; el.querySelectorAll("[data-z]").forEach(z => z.onclick = null); if (el.dataset.z) el.onclick = ev => { ev.stopPropagation(); pick(); }; }
     }
   }
@@ -592,7 +595,7 @@ function toggle(q, o) {
   document.querySelectorAll("#opts .ob").forEach(b => b.classList.toggle("on", multiSel.has(b.dataset.oid)));
   for (const o2 of q.options) {
     const ln = linkFor(q, o2); if (!ln) continue;
-    const el = ln.hand !== undefined ? document.querySelector(`.hc[data-hand="${ln.hand}"]`) : document.querySelector(`#matMe .slot[data-slot="${ln.slot}"]`);
+    const el = ln.hand !== undefined ? document.querySelector(`.hc[data-hand="${ln.hand}"]`) : ln.oslot ? document.querySelector(`#matOpp .slot[data-oslot="${ln.oslot}"]`) : document.querySelector(`#matMe .slot[data-slot="${ln.slot}"]`);
     if (el) el.classList.toggle("sel", multiSel.has(String(o2.id)));
   }
   updSum(q);
