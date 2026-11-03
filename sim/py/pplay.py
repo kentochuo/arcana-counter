@@ -1515,9 +1515,10 @@ def snap(p, hide_hand=False):
          "vgr": p.v_grade, "vp": min(p.vg_power() + sum(b[1] for b in vbon(p) if len(b) < 3), 10 ** 9), "vbon": [b[:2] for b in vbon(p)], "c": circ,
          "vno": p.vg.d["no"], "vr": p.v_rest, "vg_g": list(p.vgauge),
          "dmg": [[short_name(c), f, c.d["no"]] for c, f in p.dmg_zone], "soul": len(p.soul), "en": p.energy,
-         "deck": len(p.deck), "drop": len(p.drop), "dropno": [c.d["no"] for c in p.drop], "arc": dict(p.arcana),
+         "deck": len(p.deck), "drop": len(p.drop), "dropno": [c.d["no"] for c in p.drop], "soulno": [c.d["no"] for c in p.soul], "arc": dict(p.arcana),
          "gz": list(getattr(p, "gzone", [])), "hn": len(p.hand), "turn": p.turn}
     if not hide_hand:
+        d["deckno"] = sorted(c.d["no"] for c in p.deck)          # 順番がわからないように番号順
         d["hno"] = [c.d["no"] for c in p.hand]
         d["hand"] = [short_name(c) for c in p.hand]
         d["htype"] = [c.trig if c.kind == "trigger" else ("sentinel" if c.kind == "sentinel" else f"g{c.grade}") for c in p.hand]

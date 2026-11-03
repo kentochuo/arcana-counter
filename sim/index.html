@@ -305,6 +305,17 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
 .tb[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
 .tb#bAi[aria-pressed="true"]{border-color:var(--gold);color:var(--gold)}
 .vb{position:absolute;left:50%;bottom:calc(2px + 1.5em);transform:translateX(-50%);font:700 8.5px/1.3 var(--body);background:rgba(0,0,0,.85);color:var(--gold);border:1px solid rgba(255,207,61,.55);padding:0 3px;white-space:nowrap;z-index:3;pointer-events:none;max-width:140%;overflow:hidden;text-overflow:ellipsis}
+button.pile{font:inherit;color:inherit;text-align:left;cursor:pointer}
+@media (hover:hover){button.pile:hover{border-color:var(--gold)}}
+button.pile .zv::after{content:" ›";font-size:.6em;color:var(--gold)}
+#pilesheet{background:rgba(7,8,12,.97)}
+#pilesheet .pnote{margin:0 0 8px;font-size:12.5px;color:var(--muted)}
+#pileG{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px 8px;align-content:start;padding:2px}
+.pc{position:relative;border:0;padding:0;background:none;cursor:zoom-in;border-radius:4px}
+.pc img{width:100%;aspect-ratio:300/437;object-fit:cover;border-radius:4px;display:block;box-shadow:0 3px 8px rgba(0,0,0,.7);outline:1px solid rgba(255,255,255,.2)}
+.pc b{position:absolute;right:3px;bottom:3px;font:600 14px/1 var(--num);background:var(--gold);color:#000;padding:2px 5px;border-radius:3px}
+.pc i{position:absolute;left:3px;top:3px;font:italic 700 9px/1 var(--en);background:rgba(0,0,0,.8);color:#fff;padding:2px 4px;border-radius:2px}
+.pgh{grid-column:1/-1;font:400 13px/1.4 var(--disp);color:var(--gold);border-bottom:1px solid var(--line2);padding-top:4px}
 </style>
 </head>
 <body>
@@ -351,6 +362,7 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
   </div>
 </section>
 
+<div class="sheet" id="pilesheet" hidden><div class="hd"><b id="pileT"></b><button class="tb" id="bPileClose" type="button">閉じる</button></div><p class="pnote" id="pileN"></p><div id="pileG"></div></div>
 <div class="sheet" id="logsheet" hidden><div class="hd"><b>対戦ログ</b><button class="tb" id="bLogClose" type="button">閉じる</button></div><div id="loglist"></div></div>
 <div class="sheet" id="zoom" hidden><div class="zb"><div class="zr"><figure class="zm"><img alt=""><figcaption></figcaption></figure><div class="zt2"></div></div><span class="zhint">タップで閉じる</span></div></div>
 <div class="banner" id="banner" aria-hidden="true"><div><b></b><span></span></div></div>
@@ -455,6 +467,25 @@ $("bUndo").onclick = $("bOvUndo").onclick = () => {
 $("bAi").onclick = () => { st.showAI = st.showAI === false; save(); $("bAi").setAttribute("aria-pressed", st.showAI !== false); if (cur && cur.status === "ask") renderPanel(cur.q); };
 $("bLog").onclick = $("bOvLog").onclick = () => { renderLog(); $("logsheet").hidden = false; };
 $("bLogClose").onclick = () => $("logsheet").hidden = true;
+$("bPileClose").onclick = () => $("pilesheet").hidden = true;
+function showPile(kind, who) {
+  if (!cur) return;
+  const p = who === "me" ? cur.me : cur.ai;
+  const list = kind === "deck" ? (p.deckno || []) : kind === "drop" ? (p.dropno || []) : (p.soulno || []);
+  const nm = {deck:"山札", drop:"ドロップ", soul:"ソウル"}[kind];
+  $("pileT").textContent = `${who === "me" ? "自分" : "相手"}の${nm}(${list.length}枚)`;
+  $("pileN").textContent = kind === "deck" ? "残っているカードを番号順に並べています(山札の順番はわかりません)。タップで拡大。" : kind === "drop" ? "左上が一番新しく置かれたカードです。タップで拡大。" : "左上が一番新しく置かれたカードです(ソウルの下から順)。タップで拡大。";
+  let h = "";
+  if (kind === "deck") {
+    const cnt = {}; list.forEach(n => cnt[n] = (cnt[n] || 0) + 1);
+    h = Object.keys(cnt).map(n => `<button type="button" class="pc" data-zz="${n}">${img(n)}<b>×${cnt[n]}</b></button>`).join("");
+  } else {
+    h = list.slice().reverse().map((n, i) => `<button type="button" class="pc" data-zz="${n}">${img(n)}${i === 0 ? "<i>NEW</i>" : ""}</button>`).join("") || '<p class="pnote">まだありません</p>';
+  }
+  $("pileG").innerHTML = h;
+  $("pileG").querySelectorAll("[data-zz]").forEach(b => b.onclick = ev => { ev.stopPropagation(); zoom(b.dataset.zz); });
+  $("pilesheet").hidden = false;
+}
 $("bMenu").onclick = () => $("menu").hidden = false;
 $("mClose").onclick = () => $("menu").hidden = true;
 $("mNew").onclick = backToStart;
@@ -543,9 +574,9 @@ function mat(p, who, q) {
     <div class="field">${f}</div>
     <div class="rz">
       <div class="nmr"><span class="band deck-${p.name}"><b>${p.name}</b><span class="g">G${p.vgr}</span></span><span class="who">${isMe ? "YOU" : "AI"}</span>${ohand}</div>
-      <div class="row"><div class="zt pile deckp"><div class="zl">山札<small>DECK</small></div><div class="zv">${p.deck}</div></div>
-        <div class="zt pile"><div class="zl">ドロップ<small>DROP</small></div><div class="zv">${p.drop}</div></div></div>
-      <div class="row"><div class="zt pile"><div class="zl">ソウル<small>SOUL</small></div><div class="zv">${p.soul}</div></div>
+      <div class="row">${isMe ? `<button type="button" class="zt pile deckp pb" data-pile="deck" data-who="me" aria-label="山札の中身を見る(順番はわかりません)">` : `<div class="zt pile deckp">`}<div class="zl">山札<small>DECK</small></div><div class="zv">${p.deck}</div>${isMe ? "</button>" : "</div>"}
+        <button type="button" class="zt pile pb" data-pile="drop" data-who="${who}" aria-label="ドロップを見る"><div class="zl">ドロップ<small>DROP</small></div><div class="zv">${p.drop}</div></button></div>
+      <div class="row"><button type="button" class="zt pile pb" data-pile="soul" data-who="${who}" aria-label="ソウルを見る"><div class="zl">ソウル<small>SOUL</small></div><div class="zv">${p.soul}</div></button>
         <div class="zt pile"><div class="zl">エネルギー<small>ENERGY</small></div><div class="zv">${p.en}</div></div></div>
       <div class="zt oz"><div class="zl">オーダー<small>ARCANA</small></div>${p.vgr >= 1 && TEAMTOK[p.name] ? `<button type="button" class="ttk" data-z="${TEAMTOK[p.name]}" aria-label="セットオーダー(チームトークン)を見る"><img alt="" src="img/${TEAMTOK[p.name]}.webp">セットオーダー</button>` : ""}<div class="arcs">${arcs || '<span class="ac">なし</span>'}</div>${gz}</div>
     </div>`;
@@ -557,6 +588,7 @@ function render() {
   $("title").innerHTML = `${c.me.name} <i>VS</i> ${c.ai.name}` + (c.status === "ask" ? (c.me.turn === 0 && c.q.kind === "mulligan" ? "  マリガン" : `  ${c.active === "me" ? "自分" : "相手"}のターン`) : "");
   $("matOpp").innerHTML = mat(c.ai, "ai", q);
   $("matMe").innerHTML = mat(c.me, "me", q);
+  document.querySelectorAll("[data-pile]").forEach(b => b.onclick = ev => { ev.stopPropagation(); showPile(b.dataset.pile, b.dataset.who); });
   $("matOpp").className = `mat vgmat opp deck-${c.ai.name}`; $("matMe").className = `mat vgmat me deck-${c.me.name}`;
   document.body.className = "deck-" + c.me.name;
   const gzz = (c.me.gz && c.me.gz.length) ? c.me.gz : (c.ai.gz || []);
