@@ -368,12 +368,13 @@ class HumanPlayer(PersonaPlayer):
                     if len(self.dmg_zone) - self.cb_avail() >= 1:
                         opts.append(dict(id="eliz:cc", label="エリザベス(手札)をソウルへ:カウンターチャージ1", no=el[0].d["no"]))
             # P3:覚醒
-            if self.series == "P3" and g >= 3 and o.v_grade >= 3:
+            if self.series == "P3" and g >= 3 and o.v_grade >= 3 and getattr(self, "awaken_turn", -1) != self.turn:   # S.E.E.S.の【起】【ターン1回】
                 for k, u in self.circles.items():
                     if u and u.gauge and "evolve" in GAUGES[u.gauge]:
-                        if any(c.name == u.card.name for c in self.soul + self.drop):
+                        nd = sum(1 for c in self.drop if c.name == u.card.name); ns = sum(1 for c in self.soul if c.name == u.card.name)
+                        if nd or ns:
                             opts.append(dict(id=f"awaken:{k}", label=f"覚醒:{cname(u.card)}({u.gauge}→{GAUGES[u.gauge]['evolve']})",
-                                             no=u.card.d["no"], sub="ソウル/ドロップの同名カードをバインド"))
+                                             no=u.card.d["no"], sub=f"S.E.E.S.の【起】(ターン1回):同名カードをバインド(ドロップ{nd}枚・ソウル{ns}枚)"))
             # 菜々子(正義3つ)
             if g >= 3 and self.key == "P4" and self.arcana["正義"] >= 3 and len(self.soul) >= 1:
                 nn = [x for x in self.drop if x.d["no"] == "015"]
@@ -434,9 +435,17 @@ class HumanPlayer(PersonaPlayer):
                     self.cc(1); self.L("エリザベスをソウルへ:カウンターチャージ1")
             elif kind == "awaken":
                 u = self.circles[arg]
-                src = [c for c in self.soul + self.drop if c.name == u.card.name]
-                c = src[0]
+                fd = next((c for c in self.drop if c.name == u.card.name), None)
+                fs = next((c for c in self.soul if c.name == u.card.name), None)
+                if fd and fs:
+                    self.hint((["drop"], "ソウルはスキルのコストに使うので、ドロップのカードをバインドします"))
+                    w = self.ask("eff_pick", f"覚醒:{cname(u.card)}のコストでバインドするカードを選んでください",
+                                 [dict(id="drop", label="ドロップの同名カード", no=fd.d["no"]), dict(id="soul", label="ソウルの同名カード", no=fs.d["no"], sub=f"ソウルが{len(self.soul)}→{len(self.soul) - 1}枚に減る")])
+                    c = fd if w == "drop" else fs
+                else:
+                    c = fd or fs
                 (self.soul if c in self.soul else self.drop).remove(c)
+                self.awaken_turn = self.turn
                 self.bind.append(c)
                 self.awakened.add(u.card.name)
                 u.gauge = GAUGES[u.gauge]["evolve"]

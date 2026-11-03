@@ -1211,17 +1211,18 @@ class PersonaPlayer:
         self.marie_persona()
         self.main_calls(o)
         # P3:覚醒
-        if self.series == "P3" and g >= 3 and o.v_grade >= 3:
+        if self.series == "P3" and g >= 3 and o.v_grade >= 3 and getattr(self, "awaken_turn", -1) != self.turn:     # S.E.E.S.の【起】【ターン1回】
             cands = [(k, u) for k, u in self.circles.items() if u and u.gauge and "evolve" in GAUGES[u.gauge]]
             for k, u in sorted(cands, key=lambda kv: kv[0] not in ("FL", "FR")):
-                src = [c for c in self.soul + self.drop if c.name == u.card.name]
+                src = [c for c in self.drop + self.soul if c.name == u.card.name]     # コストはドロップ優先(ソウルはスキル用に残す)
                 if src:
                     c = src[0]
                     (self.soul if c in self.soul else self.drop).remove(c)
                     self.bind.append(c)
                     self.awakened.add(u.card.name)
+                    self.awaken_turn = self.turn
                     u.gauge = GAUGES[u.gauge]["evolve"]
-                    self.L("覚醒", u.card, "→", u.gauge)
+                    self.L("覚醒", u.card, "→", u.gauge, "(" + ("ドロップ" if c not in self.soul else "ソウル") + "の同名カードをバインド)")
                     break
         # G3の【起】2(ペルソナライドしたターン)
         if g >= 3 and self.persona_this_turn:
