@@ -1042,6 +1042,9 @@ class HumanPlayer(PersonaPlayer):
             if boosted and circ[b]:
                 circ[b].rest = True
             self.cur_spot = spot
+            if target != "V" and opp.circles.get(target) and getattr(atk, "sweep", False):
+                self.L("  前列すべてとバトル:アタックはヴァンガードと前列のリアガードすべてが対象になる")
+                target = "V"
             if target != "V" and opp.circles.get(target):
                 res = self.resolve_rg(opp, atk, remaining, self.pend, target)
             else:
@@ -1275,7 +1278,10 @@ class HumanPlayer(PersonaPlayer):
             return 0
         self.hint(lambda: self.guard_hint(atk, attacker, defense))
         pick = self.ask("guard", f"ガード:相手のアタック {atk.power}(☆{atk.crit}" + (f"・ドライブ{atk.drives}" if atk.drives else "") + f")/ 自分 {defense}",
-                        opts, multi=True, desc=f"止めるにはシールド{need}以上(5000単位なら{-(-need // 5000) * 5000})。何も選ばなければノーガード。", extra=info)
+                        opts, multi=True, desc=f"止めるにはシールド{need}以上(5000単位なら{-(-need // 5000) * 5000})。何も選ばなければノーガード。"
+                        + (("このアタックは前列すべてとバトル:アタックされている前列のリアガードはインターセプトできず、パワー" + str(atk.power) + "以下の前列のリアガード("
+                            + "・".join(f"{cname(self.circles[k].card)} {self.unit_power(self.circles[k], self.opp, k)}" for k in ("FL", "FR") if self.circles[k]) + ")は退却します(ガードはヴァンガードにだけ)。")
+                           if getattr(atk, "sweep", False) and any(self.circles[k] for k in ("FL", "FR")) else ""), extra=info)
         pick = list(pick)
         sent = [p for p in pick if p.startswith("S")]
         if sent:

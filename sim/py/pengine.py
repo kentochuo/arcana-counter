@@ -1381,6 +1381,12 @@ class PersonaPlayer:
     # ---------------------------------------------------------- バトル
     def unit_power(self, u, opp, circle):
         c = u.card
+        if not getattr(self, "in_turn", True):
+            # 相手のターン中(アタックされる側):ペルソナゲージの【永】(あなたのターン中)・アタックした時の効果・
+            # そのターン中の効果はどれも切れているので、元々のパワーだけ(中央後列のエリザベスの18001は常に)
+            if c.d["extra"].get("elizabeth") and circle == "BC" and self.key in ("P3", "P3P") and self.v_grade >= 3:
+                return 18001
+            return c.power
         p = c.power + u.bonus
         if c.d["extra"].get("elizabeth") and circle == "BC" and self.key in ("P3", "P3P") and self.v_grade >= 3:
             p = 18001 + u.bonus
