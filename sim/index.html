@@ -217,8 +217,9 @@ const LS = "persona-sim-v1";
 const $ = id => document.getElementById(id);
 let TOK = {};
 fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
-let st = {me:"P5", opp:"P3", first:"rand", ai:"strong", game:null};
+let st = {me:"P5", opp:"P3", first:"rand", ai:"learn", game:null};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
+if (st.ai === "strong") st.ai = "search";
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
 
 // ---------- エンジン(Web Worker)
@@ -248,10 +249,12 @@ function renderStart() {
   seg($("sMe"), DECKS.map(d => [d, d]), st.me, v => { st.me = v; save(); renderStart(); }, true);
   seg($("sOpp"), DECKS.map(d => [d, d]), st.opp, v => { st.opp = v; save(); renderStart(); }, true);
   seg($("sFirst"), [["first","先攻"],["second","後攻"],["rand","ランダム"]], st.first, v => { st.first = v; save(); renderStart(); });
-  seg($("sAi"), [["normal","ふつう"],["strong","強い(先読み)"]], st.ai, v => { st.ai = v; save(); renderStart(); });
-  $("aiHint").textContent = st.ai === "strong"
-    ? "ダメージが大きくなる場面のガードで、候補ごとに試合の続きを何十回も試して一番勝てる手を選びます。考えるのに数秒かかることがあります。"
-    : "いつもの判断(シミュレーターで調整した基準)で、すぐに動きます。";
+  seg($("sAi"), [["normal","ふつう"],["learn","強い(学習)"],["search","最強(先読み)"]], st.ai, v => { st.ai = v; save(); renderStart(); });
+  $("aiHint").textContent = {
+    normal: "いつもの判断(シミュレーターで調整した基準)で、すぐに動きます。",
+    learn: "自己対戦360万場面から学んだ「この盤面でこのガードなら何%勝てるか」でガードを選びます。ふつうより約6ポイント強く、すぐに動きます。",
+    search: "ダメージが大きくなる場面のガードで、候補ごとに試合の続きを何十回も試して一番勝てる手を選びます。考えるのに数秒かかることがあります。",
+  }[st.ai] || "";
   $("bResume").hidden = !(st.game && !st.game.over);
 }
 function newGame() {

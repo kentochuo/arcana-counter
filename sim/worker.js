@@ -1,6 +1,6 @@
 // 対戦エンジン(Python)をPyodideで動かす
 importScripts("pyodide/pyodide.js");
-const FILES = ["pengine.py", "pcards.py", "engine.py", "precipes_final.py", "tune.json", "pplay.py"];
+const FILES = ["pengine.py", "pcards.py", "engine.py", "precipes_final.py", "tune.json", "pplay.py", "learn_ai.py", "learn_model.py", "learn_guard_model.json"];
 let step = null;
 const ready = (async () => {
   const py = await loadPyodide({ indexURL: "./pyodide/", env: { PYTHONHASHSEED: "0", HOME: "/home/pyodide" } });

@@ -874,7 +874,8 @@ class AIPlayer(PersonaPlayer):
 
     def __init__(self, *a, strong=False, cache=None, ctx=None, script=None, **k):
         super().__init__(*a, **k)
-        self.strong = strong
+        self.strong = strong == "search" or strong is True
+        self.level = strong if isinstance(strong, str) else ("search" if strong else "normal")
         self.cache = cache if cache is not None else []     # これまでのガードの判断 [{qi, c, s}]
         self.ctx = ctx                                       # 先読みのために試合をやり直す材料(cfg, answers)
         self.script = script                                 # 試行中:決まっている判断(None なら普通の対戦)
@@ -894,6 +895,8 @@ class AIPlayer(PersonaPlayer):
                     self.determinize()
                 return ch[0], list(ch[1])
             return super().choose_guard(atk, items, need)
+        if self.level == "learn":                            # 自己学習したモデルで選ぶ(すぐに決まり、毎回同じ答えなので記録しない)
+            return self.learned_guard(atk, items, need)
         if k < len(self.cache):                              # もう決めてある判断
             e = self.cache[k]
             if e.get("m"):
@@ -905,6 +908,18 @@ class AIPlayer(PersonaPlayer):
         if self.strong and self.damage + atk.crit >= self.MIN_STAKE:
             pick = self.search(atk, items, need, pick)
         self.cache.append(dict(qi=self.opp.qi, c=pick[0], s=list(pick[1]), m=self.last_msg))
+        return pick[0], list(pick[1])
+
+    def learned_guard(self, atk, items, need):
+        import learn_ai
+        if self.damage + atk.crit < 2:
+            return super().choose_guard(atk, items, need)
+        opts, default = learn_ai.guard_options(self, atk, items, need)
+        if len(opts) <= 1:
+            return default[0], list(default[1])
+        sf = learn_ai.state_features(self, atk)
+        pr = guard_model()([sf + learn_ai.option_features(self, atk, items, o) for o in opts])
+        pick = opts[max(range(len(opts)), key=lambda i: pr[i])]
         return pick[0], list(pick[1])
 
     def search(self, atk, items, need, default):
@@ -951,6 +966,17 @@ class AIPlayer(PersonaPlayer):
         n = len(o.hand)
         o.hand, o.deck = pool[:n], pool[n:]
         self.rng.seed(self.r_seed + 1)
+
+
+_GUARD_MODEL = None
+
+
+def guard_model():
+    global _GUARD_MODEL
+    if _GUARD_MODEL is None:
+        import os, learn_model
+        _GUARD_MODEL = learn_model.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "learn_guard_model.json"))
+    return _GUARD_MODEL
 
 
 def rollout(cfg, answers, script, seed):
@@ -1033,7 +1059,7 @@ def run(cfg, answers, cache=None):
     log = []
     cache = [e for e in (cache or []) if e["qi"] <= len(answers)]      # 1手戻した時:それより後の判断は捨てる
     me = HumanPlayer(cfg["me"], FINAL[cfg["me"]], rng, log, list(answers))
-    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, log, strong=cfg.get("ai") == "strong", cache=cache, ctx=(cfg, list(answers)))
+    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, log, strong={"strong": "search", "search": "search", "learn": "learn"}.get(cfg.get("ai"), False), cache=cache, ctx=(cfg, list(answers)))
     me.opp, ai.opp = ai, me
     players = [me, ai] if cfg["first"] else [ai, me]
     state = dict(winner=None, turn_no=0)
