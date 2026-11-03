@@ -39,18 +39,19 @@ def guard_options(p, atk, items, need):
 def state_features(p, atk):
     o = p.opp
     h = p.hand
+    _n = lambda x: x if isinstance(x, (int, float)) else len(x)   # 環境デッキ(旧エンジン)の相手は枚数だけ持つことがある
     tr = lambda t: sum(1 for c in h if c.kind == "trigger" and c.trig == t)
     units = p.units()
     rem = getattr(p, "cur_rem", 1)
     need0 = atk.power - p.vg_power() + 1
     f = [1.0 if p.key == k else 0.0 for k in DECKS] + [1.0 if getattr(o, "key", "") == k else 0.0 for k in DECKS]
-    f += [o.turn, p.damage, o.damage, p.cb_avail(), len(p.soul), p.energy, getattr(o, "energy", 0), len(getattr(o, "soul", [])),
+    f += [o.turn, p.damage, o.damage, p.cb_avail(), len(p.soul), p.energy, getattr(o, "energy", 0), _n(getattr(o, "soul", [])),
           len(h), tr("crit"), tr("draw"), tr("front"), tr("heal"), tr("over"),
           sum(1 for c in h if c.kind == "sentinel"), sum(1 for c in h if p.is_g3(c)),
           sum(1 for c in h if c.kind == "unit" and c.grade == 1), sum(1 for c in h if c.kind == "unit" and c.grade == 2 and not p.is_g3(c)),
           len(units), sum(1 for k in ("FL", "FR") if p.circles[k]), sum(1 for u in units if u.gauge),
-          p.v_grade, o.v_grade, len(p.vgauge), len(p.deck), len(o.hand), len(getattr(o, "deck", [])),
-          sum(1 for k in ("FL", "FR") if o.circles.get(k)), sum(p.arcana.values()), sum(1 for v in p.arcana.values() if v >= 3),
+          p.v_grade, o.v_grade, len(p.vgauge), len(p.deck), _n(o.hand), _n(getattr(o, "deck", [])),
+          sum(1 for k in ("FL", "FR") if (o.circles.get(k) if isinstance(getattr(o, "circles", None), dict) else 0)), sum(p.arcana.values()), sum(1 for v in p.arcana.values() if v >= 3),
           need0 / 10000, atk.crit, atk.drives, 1.0 if atk.is_v else 0.0, rem]
     return f
 
