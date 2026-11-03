@@ -270,8 +270,25 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
 #loglist{flex:1;overflow-y:auto;background:var(--panel);border:1px solid var(--line2);border-radius:6px;padding:6px 8px;font-size:13px;-webkit-user-select:text;user-select:text}
 #loglist div{padding:2px 0;border-bottom:1px solid var(--line);white-space:pre-wrap;word-break:break-all}
 #loglist .me{color:#bcd3ff}#loglist .ai{color:#ffb4b4}#loglist .tn{font-weight:700;color:#fff;border-top:1px solid var(--line2);margin-top:4px;padding-top:4px}
-#zoom{align-items:center;justify-content:center}
-#zoom img{max-width:min(86vw,380px);max-height:80vh;border-radius:12px;box-shadow:0 0 0 1px rgba(255,255,255,.3),0 20px 60px rgba(0,0,0,.8)}
+#zoom{align-items:center;justify-content:center;overflow-y:auto;background:rgba(0,0,0,.88)}
+#zoom.hasg .zm img{max-height:40vh}
+#zoom .zb{margin:auto;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:min(96vw,980px)}
+#zoom .zr{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start}
+#zoom figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+#zoom .zm img{width:min(70vw,340px);max-height:68vh;object-fit:contain;border-radius:12px;box-shadow:0 0 0 1px rgba(255,255,255,.3),0 20px 60px rgba(0,0,0,.8)}
+#zoom figcaption{color:#fff;font-weight:700;font-size:14px;text-align:center}
+.zt2{display:flex;flex-direction:column;gap:10px;max-width:min(92vw,520px)}
+.tk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;background:rgba(17,20,28,.96);border:1px solid var(--line2);border-left:4px solid var(--gold);border-radius:4px;padding:10px}
+.tk img{width:min(26vw,120px);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.6)}
+.tk h4{margin:0 0 4px;font:400 15px/1.4 var(--disp);color:#fff;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.tk h4 small{font:italic 700 10px/1 var(--en);letter-spacing:.14em;color:var(--gold)}
+.tk p{margin:0 0 4px;font-size:12.5px;line-height:1.65;color:var(--text);-webkit-user-select:text;user-select:text}
+.tk p.sk{color:#fff}
+.tk p.sk b{color:var(--gold)}
+.zhint{font-size:12px;color:var(--muted)}
+.gg{pointer-events:auto!important;cursor:pointer}
+.ttk{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--gold);background:rgba(0,0,0,.4);color:var(--gold);border-radius:3px;padding:1px 6px 1px 1px;font:700 10px/1.2 var(--body);cursor:pointer;min-height:24px}
+.ttk img{width:16px;border-radius:2px}
 #over .box,#menu .box{margin:auto;background:var(--panel);border:1px solid var(--line2);border-radius:6px;box-shadow:0 20px 60px rgba(0,0,0,.8);padding:24px;text-align:center;display:flex;flex-direction:column;gap:12px;min-width:280px;color:var(--text)}
 #over h2{margin:0 0 4px;font:italic 700 clamp(56px,16vw,96px)/1 var(--en);letter-spacing:.06em;color:#fff;text-shadow:4px 4px 0 var(--deck),8px 8px 0 #000}
 #over h2 small{display:block;font:400 18px/1.5 var(--disp);letter-spacing:.1em;text-shadow:none;color:var(--text);margin-top:6px}
@@ -335,7 +352,7 @@ button{font:inherit;color:inherit;letter-spacing:inherit}
 </section>
 
 <div class="sheet" id="logsheet" hidden><div class="hd"><b>対戦ログ</b><button class="tb" id="bLogClose" type="button">閉じる</button></div><div id="loglist"></div></div>
-<div class="sheet" id="zoom" hidden><img alt=""></div>
+<div class="sheet" id="zoom" hidden><div class="zb"><div class="zr"><figure class="zm"><img alt=""><figcaption></figcaption></figure><div class="zt2"></div></div><span class="zhint">タップで閉じる</span></div></div>
 <div class="banner" id="banner" aria-hidden="true"><div><b></b><span></span></div></div>
 <div class="sheet" id="over" hidden><div class="box"><h2 id="ovT"></h2><div id="ovD"></div>
   <button class="big" id="bAgain" type="button">同じデッキでもう一度</button><button class="big sub" id="bBack" type="button">デッキを選び直す</button>
@@ -351,6 +368,9 @@ const LS = "persona-sim-v1";
 const $ = id => document.getElementById(id);
 let TOK = {};
 fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
+let TT = {};
+fetch("tokentext.json").then(r => r.json()).then(j => TT = j).catch(() => {});
+const TEAMTOK = {P3:"T51", P3P:"T51", P4:"T52", P5:"T53"};
 let st = {me:"P5", opp:"P3", first:"rand", ai:"learn", game:null, showAI:true};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
 if (st.ai === "strong") st.ai = "search";
@@ -441,7 +461,24 @@ $("mNew").onclick = backToStart;
 $("bAgain").onclick = () => { $("over").hidden = true; newGame(); };
 $("bBack").onclick = backToStart;
 $("zoom").onclick = () => $("zoom").hidden = true;
-function zoom(no) { if (!no) return; $("zoom").querySelector("img").src = `img/${no}.webp`; $("zoom").hidden = false; }
+function tokHTML(t, label) {
+  const d = TT[t]; if (!d) return "";
+  const lines = d.t.map(x => x.startsWith("〔スキル〕") ? `<p class="sk">${x.replace(/^〔スキル〕([^－]+)－/, "<b>〔スキル〕$1</b>－")}</p>` : `<p>${x}</p>`).join("");
+  return `<div class="tk"><img alt="" src="img/${t}.webp"><div><h4>${d.n}<small>${label}</small></h4>${lines}</div></div>`;
+}
+function zoom(no, gauges, deck) {
+  if (!no) return;
+  const z = $("zoom"), isTok = String(no).startsWith("T");
+  z.querySelector(".zm img").src = `img/${no}.webp`;
+  z.querySelector(".zm figcaption").textContent = isTok && TT[no] ? TT[no].n : "";
+  let h = "";
+  if (isTok) h = tokHTML(no, ["T51","T52","T53"].includes(no) ? "SET ORDER" : "PERSONA GAUGE");
+  for (const g of (gauges || [])) { const t = tokNo(g, deck); if (t) h += tokHTML(t, "PERSONA GAUGE"); }
+  z.querySelector(".zt2").innerHTML = h;
+  z.querySelector(".zm").hidden = isTok;
+  z.classList.toggle("hasg", !!h && !isTok); z.scrollTop = 0;
+  z.hidden = false;
+}
 
 function sizeCards() {
   const land = innerWidth > innerHeight && (innerHeight < 560 || innerWidth >= 900);
@@ -485,12 +522,13 @@ function mat(p, who, q) {
       const up = p.vbon && p.vbon.length;
       const g = (p.vg_g || []).join("・");
       const vb = (p.vbon || []).map(([l, v]) => `${l}+${v >= 1e7 ? "1億" : (v / 10000) + "万"}`).join(" ");
-      inner = `${em}<div class="cardw" data-z="${p.vno}">${img(p.vno)}</div>${g ? `<span class="gg">${g}</span>` : ""}${vb ? `<span class="vb">${vb}</span>` : ""}<span class="pw${up ? " up" : ""}" title="${vb}">${fmt(p.vp)}</span>`;
+      const gl = (p.vg_g || []).join("|");
+      inner = `${em}<div class="cardw" data-z="${p.vno}" data-g="${gl}" data-dk="${p.name}">${img(p.vno)}</div>${g ? `<span class="gg" data-z="${p.vno}" data-g="${gl}" data-dk="${p.name}" role="button" aria-label="ペルソナゲージ ${g} を見る">${g}</span>` : ""}${vb ? `<span class="vb">${vb}</span>` : ""}<span class="pw${up ? " up" : ""}" title="${vb}">${fmt(p.vp)}</span>`;
     } else {
       const u = p.c[k];
       if (u) {
         cls += u.r ? " rest" : "";
-        inner = `${em}<div class="cardw" data-z="${u.no}">${img(u.no)}</div>${u.g ? `<span class="gg">${u.g}</span>` : ""}<span class="pw${u.bon && u.bon.length ? " up" : ""}">${fmt(u.p)}</span>${u.lk ? '<span class="lk"></span>' : ""}`;
+        inner = `${em}<div class="cardw" data-z="${u.no}" data-g="${u.g || ""}" data-dk="${p.name}">${img(u.no)}</div>${u.g ? `<span class="gg" data-z="${u.no}" data-g="${u.g}" data-dk="${p.name}" role="button" aria-label="ペルソナゲージ ${u.g} を見る">${u.g}</span>` : ""}<span class="pw${u.bon && u.bon.length ? " up" : ""}">${fmt(u.p)}</span>${u.lk ? '<span class="lk"></span>' : ""}`;
       } else inner = em;
     }
     f += `<div class="${cls}" data-slot="${isMe ? k : ""}" data-oslot="${isMe ? "" : k}" aria-label="${SLOTN[k]}">${inner}</div>`;
@@ -509,7 +547,7 @@ function mat(p, who, q) {
         <div class="zt pile"><div class="zl">ドロップ<small>DROP</small></div><div class="zv">${p.drop}</div></div></div>
       <div class="row"><div class="zt pile"><div class="zl">ソウル<small>SOUL</small></div><div class="zv">${p.soul}</div></div>
         <div class="zt pile"><div class="zl">エネルギー<small>ENERGY</small></div><div class="zv">${p.en}</div></div></div>
-      <div class="zt oz"><div class="zl">オーダー<small>ARCANA</small></div><div class="arcs">${arcs || '<span class="ac">なし</span>'}</div>${gz}</div>
+      <div class="zt oz"><div class="zl">オーダー<small>ARCANA</small></div>${p.vgr >= 1 && TEAMTOK[p.name] ? `<button type="button" class="ttk" data-z="${TEAMTOK[p.name]}" aria-label="セットオーダー(チームトークン)を見る"><img alt="" src="img/${TEAMTOK[p.name]}.webp">セットオーダー</button>` : ""}<div class="arcs">${arcs || '<span class="ac">なし</span>'}</div>${gz}</div>
     </div>`;
 }
 function fmt(n) { return n >= 1e7 ? "1億+" : n.toLocaleString("ja-JP"); }
@@ -545,7 +583,7 @@ function render() {
   });
   // 拡大(選択に使っていない要素)
   document.querySelectorAll("[data-z]").forEach(el => {
-    el.onclick = ev => { if (el.closest(".pick")) return; ev.stopPropagation(); zoom(el.dataset.z); };
+    el.onclick = ev => { if (el.closest(".pick") && !el.classList.contains("gg")) return; ev.stopPropagation(); zoom(el.dataset.z, el.dataset.g ? el.dataset.g.split("|") : [], el.dataset.dk); };
   });
   if (c.status === "over") { renderPanel(null); showOver(); return; }
   renderPanel(q);

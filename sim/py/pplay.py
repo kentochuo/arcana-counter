@@ -193,9 +193,16 @@ class HumanPlayer(PersonaPlayer):
                 sp = self.ai_spot(c, [x for x in ids if x != "cancel"])
             return ([sp], f"{self.NMS.get(sp, sp)}に置きます") if sp in ids else None
         if kind == "attack":
-            for sp in ("FL", "V", "FR", "BC"):
-                if sp in ids:
-                    return [sp], "前列左 → ヴァンガード → 前列右 → 中央後列の順(先のドライブのトリガーを後のアタックに乗せる)"
+            order = [sp for sp in ("FL", "V", "FR", "BC") if sp in ids]
+            if order:
+                sp = order[0]
+                if len(order) == 1:
+                    why = "残りはこのユニットだけです"
+                else:
+                    why = " → ".join(self.NMS[x] for x in order) + "の順にアタックします"
+                    if sp != "V" and "V" in order:
+                        why += "(ヴァンガードのドライブチェックで出たトリガーを、後のアタックに乗せるため)"
+                return [sp], why
             return ["end"], "アタックできるユニットはもういません"
         if kind == "boost":
             return ["yes"], "ブーストできる時はブーストします"
