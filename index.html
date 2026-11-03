@@ -5,21 +5,21 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="アルカナ">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#07080c">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>アルカナカウンター</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Dela+Gothic+One&family=Oswald:wght@500;600;700&display=swap">
 <style>
 /* デジタル庁デザインシステム(DADS)の色・文字・部品にそろえた明るい配色。
    レイアウト:上に細い共通の操作帯、残りを1人分(または2人分を上下に)のパネルで埋める。1画面固定でスクロールなし */
 :root{
-  color-scheme:light;
+  color-scheme:dark;
   --bg:#ffffff; --panel:#f2f2f2; --line:#949494; --line2:#cccccc; --fg:#333333; --strong:#1a1a1a; --muted:#666666;
   --key:#0017c1; --key-1000:#00118f; --key-50:#e8f1fe; --key-200:#c5d7fb; --focus:#ffd43d; --error:#ce0000;
   --display:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;
@@ -55,7 +55,8 @@ button:focus-visible,.tile:focus-visible{outline:4px solid #000;outline-offset:2
 .duel .side{border:1px solid var(--line2);border-top:4px solid var(--accent);border-radius:12px;padding:6px;box-sizing:border-box;background:var(--panel)}
 .duel .side.opp.flip{transform:rotate(180deg)}
 .bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.duel .bar{flex-wrap:nowrap}
+.duel .bar{flex-wrap:wrap;row-gap:4px}
+.duel .en{padding:1px 3px 1px 6px}.duel .en .lb{font-size:11px}.duel .en .v{font-size:18px}
 .duel .side .seg button{padding:0 8px;font-size:12px;min-height:32px}
 .duel .side .act{padding:0 8px;min-height:32px}
 .who{font:700 13px/1 var(--body);letter-spacing:.04em;color:var(--accent-text)}
@@ -112,7 +113,173 @@ button:focus-visible,.tile:focus-visible{outline:4px solid #000;outline-offset:2
 .compact.duel .pips{display:none}
 .compact .grid{flex:1}
 .compact .side.me .grid{padding-right:34px}
+/* エネルギー(エネルギージェネレーターの上のカウンター:0〜10) */
+.en{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px 4px 2px 8px;background:var(--bg)}
+.en .lb{font:700 12px/1 var(--body);color:var(--strong);white-space:nowrap}
+.en .v{font:900 22px/1 var(--display);min-width:1.4em;text-align:center;color:var(--strong);font-variant-numeric:tabular-nums}
+.en .v small{font-size:11px;font-weight:700;color:var(--muted)}
+.en button{font:700 16px/1 var(--body);min-width:36px;min-height:36px;border:1px solid #767676;border-radius:6px;background:var(--bg);color:var(--strong);cursor:pointer;padding:0 6px}
+.en button.p3{font-size:13px;color:var(--key);border-color:currentColor}
+.en button[disabled]{opacity:.35;cursor:default}
+@media (hover:hover){.en button:not([disabled]):hover{background:var(--key-50);border-color:var(--key)}}
+.en.full .v{color:var(--accent-text)}
+.duel .en button{min-width:32px;min-height:32px}
+.compact .en{flex-wrap:nowrap;justify-content:space-between;padding:2px;gap:2px}
+.compact .en .lb,.compact .en .p3,.compact .en .v small{display:none}
+.compact .en button{min-width:24px;min-height:30px;font-size:13px;padding:0}
+.compact .en .v{font-size:16px;min-width:1.2em}
+.compact .en .v::before{content:"EN";display:block;font:700 8px/1 var(--body);color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+/* ヴァンガード×ペルソナ30th テーマ(2026/11/03)
+   - 盤面:黒いプレイマット(1つ前のプレイマットの雰囲気)に、今のルールの配置(左にダメージゾーン、中央にサークル、右に山札・ドロップ・オーダーゾーン)
+   - サークル:ヴァンガード=赤、リアガード=緑、ガーディアン=青(公式マットの色分け)。紋章は独自の輪と文字
+   - ペルソナ30th:デッキ色の斜めスラッシュ、斜めの見出し帯、太い見出し文字
+   - デジタル庁デザインシステムから残すもの:黄色+黒のフォーカスリング、44px以上の押しやすいボタン、読みやすい本文の文字と行間、色だけに頼らない表示 */
+:root{
+  color-scheme:dark;
+  --ink:#f4f5f8; --text:#d9dce4; --muted:#9aa1b2; --line:rgba(255,255,255,.16); --line2:rgba(255,255,255,.28);
+  --bg:#07080c; --panel:#11141c; --panel2:#181c27; --glass:rgba(12,14,20,.78);
+  --v:#ff3b47; --r:#34d27b; --g:#3f8cff; --gold:#ffcf3d; --focus:#ffd43d;
+  --key:#2f5bff; --key-2:#5f86ff; --key-ink:#ffffff;
+  --p3:#2b8cff; --p3p:#e040e0; --p4:#ffc61a; --p5:#ff2d2d;
+  --crit:#ff4b4b; --draw:#ffc61a; --front:#3f9bff; --heal:#38d27b; --over:#a66bff; --sent:#aab1c0;
+  --deck:#ff2d2d;
+  --body:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Sans','Hiragino Kaku Gothic ProN',sans-serif;
+  --disp:'Dela Gothic One','Noto Sans JP',sans-serif;
+  --en:'Oswald','Noto Sans JP',sans-serif;
+  --num:'Oswald','Noto Sans Mono',ui-monospace,monospace;
+}
+:focus-visible{outline:3px solid var(--focus)!important;outline-offset:2px!important;box-shadow:0 0 0 6px #000!important}
+::selection{background:var(--gold);color:#000}
+.deck-P3{--deck:var(--p3)}.deck-P3P{--deck:var(--p3p)}.deck-P4{--deck:var(--p4)}.deck-P5{--deck:var(--p5)}
+.deck-P3PT{--deck:var(--p3p)}.deck-P5A{--deck:var(--p5)}
+
+/* ---------- プレイマット */
+.vgmat{--deck2:color-mix(in srgb,var(--deck) 34%,transparent);
+  position:relative;border-radius:14px;overflow:hidden;isolation:isolate;
+  background:
+    radial-gradient(ellipse 60% 70% at 50% 55%,rgba(255,255,255,.07),transparent 70%),
+    repeating-radial-gradient(circle at 50% 55%,rgba(255,255,255,.035) 0 1px,transparent 1px 26px),
+    linear-gradient(118deg,transparent 0 70%,var(--deck2) 70% 71.2%,transparent 71.2% 73%,color-mix(in srgb,var(--deck) 16%,transparent) 73% 79%,transparent 79%),
+    linear-gradient(180deg,#14171f,#0b0d12);
+  border:1px solid var(--line);box-shadow:inset 0 0 0 1px rgba(0,0,0,.6),0 8px 24px rgba(0,0,0,.5)}
+.vgmat::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.55;
+  background:
+    linear-gradient(90deg,transparent 49.9%,rgba(255,255,255,.05) 50%,transparent 50.1%),
+    conic-gradient(from 0deg at 50% 55%,transparent 0 10deg,rgba(255,255,255,.03) 10deg 11deg,transparent 11deg 40deg,rgba(255,255,255,.03) 40deg 41deg,transparent 41deg 90deg,rgba(255,255,255,.03) 90deg 91deg,transparent 91deg 130deg,rgba(255,255,255,.03) 130deg 131deg,transparent 131deg 180deg,rgba(255,255,255,.03) 180deg 181deg,transparent 181deg 220deg,rgba(255,255,255,.03) 220deg 221deg,transparent 221deg 270deg,rgba(255,255,255,.03) 270deg 271deg,transparent 271deg 310deg,rgba(255,255,255,.03) 310deg 311deg,transparent 311deg)}
+.vgmat.turn{border-color:color-mix(in srgb,var(--deck) 70%,#fff 0%);box-shadow:inset 0 0 0 1px var(--deck),0 0 0 1px var(--deck),0 0 22px color-mix(in srgb,var(--deck) 45%,transparent)}
+
+/* サークル(紋章は独自デザイン:目盛りの輪+文字) */
+.em{position:absolute;left:50%;top:50%;width:calc(var(--cw)*1.22);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+  --c:var(--r);
+  background:radial-gradient(circle,color-mix(in srgb,var(--c) 22%,transparent) 0 44%,transparent 45% 100%);
+  box-shadow:0 0 0 1.5px color-mix(in srgb,var(--c) 85%,transparent),0 0 14px color-mix(in srgb,var(--c) 45%,transparent),inset 0 0 12px color-mix(in srgb,var(--c) 40%,transparent)}
+.em::before{content:"";position:absolute;inset:7%;border-radius:50%;
+  background:repeating-conic-gradient(color-mix(in srgb,var(--c) 85%,transparent) 0 2deg,transparent 2deg 15deg);
+  -webkit-mask:radial-gradient(circle,transparent 0 62%,#000 63% 70%,transparent 71%);mask:radial-gradient(circle,transparent 0 62%,#000 63% 70%,transparent 71%)}
+.em::after{content:attr(data-l);position:absolute;inset:0;display:grid;place-items:center;font:italic 700 calc(var(--cw)*.52)/1 var(--en);
+  color:color-mix(in srgb,var(--c) 92%,#fff);text-shadow:0 0 10px var(--c),0 2px 0 #000;letter-spacing:-.02em}
+.em.v{--c:var(--v);width:calc(var(--cw)*1.32)}
+.em.v::before{background:repeating-conic-gradient(color-mix(in srgb,var(--c) 90%,transparent) 0 1.5deg,transparent 1.5deg 7.5deg)}
+.em.g{--c:var(--g)}
+.slot .lb{position:absolute;left:50%;bottom:-2px;transform:translate(-50%,100%);font:600 9px/1.2 var(--body);color:var(--muted);white-space:nowrap;letter-spacing:.04em}
+
+/* ゾーンの枠 */
+.zt{border:1px solid var(--line2);border-radius:6px;background:rgba(0,0,0,.38);position:relative}
+.zt .zl{display:flex;align-items:baseline;justify-content:space-between;gap:4px;font:700 10px/1.2 var(--body);color:var(--text);letter-spacing:.04em;white-space:nowrap}
+.zt .zl small{font:500 8.5px/1 var(--en);letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.zt .zv{font:600 clamp(16px,calc(var(--cw)*.36),26px)/1 var(--num);color:var(--ink);font-variant-numeric:tabular-nums}
+.back{border-radius:5px;background:
+  radial-gradient(circle at 50% 50%,rgba(120,170,255,.35) 0 12%,transparent 13% 22%,rgba(120,170,255,.25) 23% 24%,transparent 25% 34%,rgba(120,170,255,.18) 35% 36%,transparent 37%),
+  repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 2px,transparent 2px 8px),
+  linear-gradient(160deg,#1b2a55,#0a1128);
+  box-shadow:inset 0 0 0 2px rgba(180,200,255,.35),0 3px 8px rgba(0,0,0,.6)}
+
+/* 名前の帯(ペルソナの斜め帯) */
+.band{display:inline-flex;align-items:center;gap:8px;transform:skewX(-14deg);background:var(--deck);color:#fff;padding:2px 12px 2px 10px;box-shadow:4px 4px 0 rgba(0,0,0,.55)}
+.band > *{transform:skewX(14deg)}
+.deck-P4 .band,.band.deck-P4{color:#111}
+.band b{font:400 14px/1.3 var(--disp);letter-spacing:.02em;white-space:nowrap}
+.band .g{font:italic 600 12px/1 var(--en);opacity:.9}
+
+/* 数字(パワー) */
+.pw{font:600 11px/1.25 var(--num)!important;letter-spacing:.02em;background:rgba(0,0,0,.82)!important;color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:3px!important}
+.pw.up{background:linear-gradient(90deg,#b31212,#ff5a1f)!important;border-color:#ffb199}
+
+/* ボタン(DADSの大きさ・フォーカスを残し、色と形をゲーム風に) */
+.vbtn{font:700 16px/1.3 var(--body);min-height:48px;padding:10px 18px;border-radius:4px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink);cursor:pointer}
+@media (hover:hover){.vbtn:hover{border-color:var(--gold);background:#222838}}
+.vbtn.primary{position:relative;border:0;color:#fff;background:linear-gradient(100deg,#d0101f,#ff3b2f 55%,#ff7a2f);clip-path:polygon(4% 0,100% 0,96% 100%,0 100%);
+  font:400 20px/1.2 var(--disp);letter-spacing:.06em;min-height:60px;text-shadow:0 2px 0 rgba(0,0,0,.35);box-shadow:none}
+.vbtn.primary small{display:block;font:italic 600 12px/1.2 var(--en);letter-spacing:.3em;opacity:.9}
+@media (hover:hover){.vbtn.primary:hover{filter:brightness(1.12)}}
+
+/* ターンの切り替わり演出 */
+.banner{position:fixed;left:0;right:0;top:38%;z-index:60;pointer-events:none;display:grid;place-items:center;opacity:0}
+.banner.show{animation:bnr 1.25s ease forwards}
+.banner div{transform:skewX(-14deg);background:var(--deck);color:#fff;padding:8px 48px;box-shadow:0 0 0 3px #000,8px 8px 0 #000;text-align:center}
+.banner.deck-P4 div{color:#111}
+.banner b{display:block;transform:skewX(14deg);font:italic 700 clamp(30px,8vw,64px)/1 var(--en);letter-spacing:.06em}
+.banner span{display:block;transform:skewX(14deg);font:400 clamp(13px,3vw,18px)/1.4 var(--disp)}
+@keyframes bnr{0%{opacity:0;transform:translateX(-30%)}18%{opacity:1;transform:none}75%{opacity:1;transform:none}100%{opacity:0;transform:translateX(30%)}}
+@media (prefers-reduced-motion:reduce){.banner.show{animation:bnrr 1.2s linear forwards}@keyframes bnrr{0%,100%{opacity:0}15%,80%{opacity:1}}}
+
+/* ===== ヴァンガード×ペルソナ30th の基調(対戦練習・リプレイとそろえる) ===== */
+:root{--bg:#07080c;--panel:#11141c;--line:rgba(255,255,255,.28);--line2:rgba(255,255,255,.16);--fg:#d9dce4;--strong:#f4f5f8;--muted:#9aa1b2;
+  --key:#5f86ff;--key-1000:#2f5bff;--key-50:rgba(95,134,255,.16);--key-200:rgba(95,134,255,.3);--error:#ff3b47;
+  --display:'Oswald','Noto Sans JP',sans-serif}
+.side[data-deck="P3"]{--accent:#2b8cff;--accent-ink:#fff;--accent-text:#7fb6ff}
+.side[data-deck="P3P"]{--accent:#e040e0;--accent-ink:#fff;--accent-text:#f08cf0}
+.side[data-deck="P4"]{--accent:#ffc61a;--accent-ink:#111;--accent-text:#ffd75e}
+.side[data-deck="P5"]{--accent:#ff2d2d;--accent-ink:#fff;--accent-text:#ff8a8a}
+body{background:
+  linear-gradient(118deg,transparent 0 66%,rgba(255,45,45,.5) 66% 67%,transparent 67% 69%,rgba(255,45,45,.12) 69% 76%,transparent 76%),
+  repeating-radial-gradient(circle at 50% 55%,rgba(255,255,255,.03) 0 1px,transparent 1px 28px),
+  radial-gradient(ellipse 90% 60% at 50% 40%,#141824,#06070a 75%);color:var(--fg)}
+button:focus-visible,.tile:focus-visible{outline:3px solid var(--focus)!important;outline-offset:2px;box-shadow:0 0 0 6px #000!important}
+.seg button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:2px;transform:skewX(-10deg)}
+.seg button[aria-pressed="true"]{background:#fff;border-color:#fff;color:#000;box-shadow:3px 3px 0 #c40d1a}
+.side .seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);box-shadow:3px 3px 0 #000}
+@media (hover:hover){.seg button[aria-pressed="false"]:hover{background:#222838;border-color:var(--gold)}}
+.act{background:var(--panel2);color:var(--strong);border:1px solid var(--line);border-radius:4px}
+@media (hover:hover){.act:hover{background:#222838;color:#fff;border-color:var(--gold);text-decoration:none}}
+.act.on{background:#fff;color:#000;border-color:#fff}
+.act.warn{background:var(--error);border-color:var(--error);color:#fff}
+.duel .side{background:linear-gradient(180deg,#14171f,#0b0d12);border:1px solid var(--line2);border-top:0;border-radius:12px;position:relative;overflow:hidden;
+  box-shadow:inset 0 3px 0 var(--accent),0 8px 24px rgba(0,0,0,.5)}
+.duel .side::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(118deg,transparent 0 72%,color-mix(in srgb,var(--accent) 30%,transparent) 72% 73.2%,transparent 73.2%)}
+.who{font:italic 700 13px/1 var(--en);letter-spacing:.14em;color:#fff;background:var(--accent);padding:4px 10px;transform:skewX(-14deg)}
+.side[data-deck="P4"] .who{color:#111}
+.hint{color:var(--muted)}
+.tile{background:#000;border:1px solid var(--line2);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.6)}
+.tile .art{background:#0b0d12}
+.tile img{filter:grayscale(1) brightness(.45)}
+.tile[data-n="1"] img{filter:grayscale(.5) brightness(.65)}
+.tile[data-n="2"] img{filter:grayscale(.15) brightness(.85)}
+.tile[data-n="3"] img{filter:none}
+.tile[data-n="3"]{border:2px solid var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 22px color-mix(in srgb,var(--accent) 55%,transparent)}
+.num{font:italic 700 var(--fs-num,20px)/1 var(--en);background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.3);border-radius:2px;color:#fff;transform:skewX(-8deg)}
+.count{font:600 var(--fs-count,44px)/1 var(--en);background:rgba(0,0,0,.82);border:1px solid rgba(255,255,255,.3);border-radius:4px;color:#fff}
+.tile[data-n="3"] .count{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);text-shadow:none}
+.foot{background:#0d1017;border-top:1px solid var(--line2)}
+.name{color:var(--strong)}
+.pip{border-color:rgba(255,255,255,.45)}
+.pip.on{background:var(--gold);border-color:var(--gold)}
+.tile[data-n="3"] .pip.on{background:var(--accent);border-color:var(--accent)}
+.minus{background:rgba(0,0,0,.8);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:4px}
+.edit .tile.sel{border:2px solid var(--gold)}
+.check{background:var(--gold);color:#000}
+.gear{background:var(--panel2);color:var(--strong);border:1px solid var(--line)}
+.compact.menu .top{background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.7)}
+.en{background:rgba(0,0,0,.45);border:1px solid var(--line);border-radius:4px;position:relative}
+.en::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--gold)}
+.en .lb{color:var(--strong)}
+.en .v{font-family:var(--en);font-weight:600;color:#fff}
+.en .v small{color:var(--muted)}
+.en.full .v{color:var(--gold)}
+.en button{background:var(--panel2);color:#fff;border:1px solid var(--line);border-radius:3px}
+.en button.p3{border:0;color:#fff;background:linear-gradient(100deg,#c40d1a,#ff3b2f);clip-path:polygon(10% 0,100% 0,90% 100%,0 100%);padding:0 9px}
+@media (hover:hover){.en button:not([disabled]):hover{background:#222838;border-color:var(--gold)}.en button.p3:not([disabled]):hover{filter:brightness(1.15);background:linear-gradient(100deg,#c40d1a,#ff3b2f)}}
 </style>
 
 <div class="app" id="app">
@@ -131,13 +298,14 @@ button:focus-visible,.tile:focus-visible{outline:4px solid #000;outline-offset:2
 const D = JSON.parse(document.getElementById("data").textContent);
 const DECKS = ["P3","P3P","P4","P5"], SER = {P3:"P3",P3P:"P3",P4:"P4",P5:"P5"};
 const LS = "arcana-counter-v2";
-const mkSide = deck => ({deck, sel:{}, cnt:{}});
+const mkSide = deck => ({deck, sel:{}, cnt:{}, en:0});
 let st = {mode:"single", art:"chara", flip:true, me:mkSide("P5"), opp:mkSide("P3")};
 try {
   const s = JSON.parse(localStorage.getItem(LS) || "null");
   if (s) st = Object.assign(st, s);
   else { const o = JSON.parse(localStorage.getItem("arcana-counter-v1") || "null"); if (o) Object.assign(st.me, o); }
 } catch(e) {}
+for (const p of ["me","opp"]) if (typeof st[p].en !== "number") st[p].en = 0;
 for (const p of ["me","opp"]) for (const k of DECKS) { st[p].sel[k] = st[p].sel[k] || D.decks[k].slice(); st[p].cnt[k] = st[p].cnt[k] || {}; }
 const ui = {me:{editing:false, arm:0}, opp:{editing:false, arm:0}};
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
@@ -176,13 +344,27 @@ function buildSide(p) {
   el.setAttribute("aria-label", p === "me" ? "自分" : "相手");
   el.innerHTML = `<div class="bar">${st.mode === "duel" ? `<span class="who">${p === "me" ? "自分" : "相手"}</span>` : ""}
       <div class="seg" role="group" aria-label="デッキ"></div><span class="spacer"></span>
+      <div class="en" role="group" aria-label="エネルギー"><span class="lb">エネルギー</span><button class="em1" type="button" aria-label="エネルギーを1減らす">−</button><span class="v" aria-live="polite"></span><button class="ep1" type="button" aria-label="エネルギーを1増やす">＋</button><button class="ep3 p3" type="button" aria-label="エネルギーを3増やす(ターン開始時のチャージ)">+3</button></div>
       <button class="act ed" type="button"></button><button class="act rs" type="button">リセット</button></div>
     ${st.mode === "single" ? `<div class="hint"></div>` : ""}<div class="grid"></div>`;
   seg(el.querySelector(".seg"), DECKS.map(k => [k, k]), S.deck, v => { S.deck = v; U.editing = false; save(); render(); });
   const ed = el.querySelector(".ed"), rs = el.querySelector(".rs"), grid = el.querySelector(".grid"), hint = el.querySelector(".hint");
+  const enBox = el.querySelector(".en");
+  const enShow = () => {
+    const v = S.en || 0;
+    enBox.querySelector(".v").innerHTML = `${v}<small>/10</small>`;
+    enBox.classList.toggle("full", v >= 10);
+    enBox.querySelector(".em1").disabled = v <= 0;
+    enBox.querySelector(".ep1").disabled = enBox.querySelector(".ep3").disabled = v >= 10;
+  };
+  const enBump = d => { S.en = Math.max(0, Math.min(10, (S.en || 0) + d)); save(); enShow(); };
+  onTap(enBox.querySelector(".em1"), () => enBump(-1));
+  onTap(enBox.querySelector(".ep1"), () => enBump(1));
+  onTap(enBox.querySelector(".ep3"), () => enBump(3));
+  enShow();
   ed.onclick = () => { U.editing = !U.editing; fill(); };
   rs.onclick = () => {
-    if (U.arm) { clearTimeout(U.arm); U.arm = 0; S.cnt[S.deck] = {}; save(); rs.textContent = "リセット"; rs.classList.remove("warn"); fill(); return; }
+    if (U.arm) { clearTimeout(U.arm); U.arm = 0; S.cnt[S.deck] = {}; S.en = 0; save(); rs.textContent = "リセット"; rs.classList.remove("warn"); enShow(); fill(); return; }
     rs.textContent = (st.mode === "duel" || $("app").classList.contains("compact")) ? "もう一度" : "もう一度で0に"; rs.classList.add("warn");
     U.arm = setTimeout(() => { U.arm = 0; rs.textContent = "リセット"; rs.classList.remove("warn"); }, 3000);
   };
@@ -222,7 +404,7 @@ function buildSide(p) {
     ed.textContent = U.editing ? "完了" : (st.mode === "duel" || $("app").classList.contains("compact") ? "選択" : "表示するアルカナ");
     ed.classList.toggle("on", U.editing);
     if (hint) hint.textContent = U.editing ? `表示するアルカナをタップで選択(${S.sel[S.deck].length}個選択中)`
-      : (list.length ? "タップで＋1(最大3)、右上の「−」で−1" : "「表示するアルカナ」からデッキのアルカナを選んでください");
+      : (list.length ? "タップで＋1(最大3)、右上の「−」で−1。エネルギーは上の＋/−(ターン開始時は+3)、リセットでアルカナとエネルギーを0に" : "「表示するアルカナ」からデッキのアルカナを選んでください");
     el._fit = () => fit(grid, list.length);
     el._fit();
   }

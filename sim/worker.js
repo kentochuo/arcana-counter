@@ -3,7 +3,7 @@ importScripts("pyodide/pyodide.js");
 const FILES = ["pengine.py", "pcards.py", "engine.py", "precipes_final.py", "tune.json", "pplay.py", "learn_ai.py", "learn_model.py", "learn_guard_model.json"];
 let step = null;
 const ready = (async () => {
-  const py = await loadPyodide({ indexURL: "./pyodide/", env: { PYTHONHASHSEED: "0", HOME: "/home/pyodide" } });
+  const py = await loadPyodide({ indexURL: "./pyodide/", stdLibURL: "./pyodide/python_stdlib.wasm", env: { PYTHONHASHSEED: "0", HOME: "/home/pyodide" } });
   for (const f of FILES) {
     const t = await (await fetch("py/" + f + "?v=" + (self.SIM_VER || ""))).text();
     py.FS.writeFile("/home/pyodide/" + f, t);
