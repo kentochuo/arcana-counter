@@ -239,3 +239,6 @@ def works_in(cdef, deck_key):
     if s == "P3":
         return deck_key in ("P3", "P3P")
     return s == deck_key
+
+# 他の弾のカード(2026/11/08):レガリスピースのノーマルオーダー(DZ-SS10/019)。デッキに1枚、ファイト中1回
+card("R19", "純黒の影は闇に蠢く", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": True})

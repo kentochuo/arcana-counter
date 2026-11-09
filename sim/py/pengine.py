@@ -494,6 +494,7 @@ class PersonaPlayer:
     BC_G2 = True                                       # G3の時、中央後列にチームのG2を置いてアタックさせる(False:G1を置いてヴァンガードをブースト)
     BC_G2_P3 = True                                   # P3/P3P:エリザベスが無い時、中央後列にS.E.E.S.のG2を置いてアタックさせる
     DECK_SAFE = 10                                     # 山札がこの枚数以下なら、G3の【起】1(山札から2体コール)や任意のドローを控える
+    NAOTO_FOCUS = os.environ.get("NAOTO_FOCUS") == "1"  # 直斗を意識したプレイ(2026/11/08):運命を貯めて転生、メギドラオン優先
     GEN_DRAW_MIN = 7                                   # エネルギージェネレーター【起】(ターン1回 EB7で1枚引く)を使うエネルギー量(自分のターン終了前)
     def __init__(self, deck_key, recipe, rng, log=None):
         """recipe: {カード番号: 枚数} 山札50枚(トリガー込み)"""
@@ -673,6 +674,7 @@ class PersonaPlayer:
     def card_value(self, c):
         """手札から捨てる/ソウルに置く時の価値(低いほど先に手放す)"""
         if c.kind == "sentinel": return 100
+        if c.kind == "order": return 88
         if self.is_g3(c):
             if sum(1 for k in self.hand if self.is_g3(k)) <= 1: return 95
             return 90 if getattr(self, "focus_th", False) and "メサイア" not in self.vgauge else 20
@@ -696,7 +698,7 @@ class PersonaPlayer:
         (self.soul if to == "soul" else self.drop).append(c)
         return c
 
-    def look_top(self, n, pred, score):
+    def look_top(self, n, pred, score, pick_kind=None):
         """山札の上n枚から条件に合う最良の1枚を取り出す(残りはシャッフル)"""
         top = self.deck[-n:]
         cands = [c for c in top if pred(c)]
@@ -704,6 +706,8 @@ class PersonaPlayer:
             self.rng.shuffle(self.deck)
             return None
         best = max(cands, key=score)
+        if pick_kind and len({c.name for c in cands}) > 1:
+            best = self.choose_card(pick_kind, cands, best)
         self.deck.remove(best)
         self.rng.shuffle(self.deck)
         return best
@@ -789,6 +793,7 @@ class PersonaPlayer:
 
     def effect(self, eff, u, circle, opp, in_battle):
         name = u.card.name
+        c = u.card
         self.L(f"  登場時効果[{eff}] {self.short(u.card)}")
         if eff == "ace_search":
             if not self.unique_used and not in_battle:
@@ -806,22 +811,23 @@ class PersonaPlayer:
             self.once.add(name)
         a = self.arcana[self.arc(u.card)] if self.arc(u.card) else 0
         if eff == "cb_draw":
-            if self.cb_avail() >= 2 or (self.cb_avail() >= 1 and self.act1_turn == self.turn):
+            if self.cb_avail() >= 1 and self.decide("cb_draw", c, self.cb_avail() >= 2 or self.act1_turn == self.turn):
                 self.pay_cb(1); self.draw(1)
         elif eff == "cb_retire":
-            if opp and self.cb_avail() >= 1 and opp.retire_one():
+            if opp and self.cb_avail() >= 1 and opp.rg_targets() and self.decide("cb_retire", c, True) and opp.retire_one():
                 self.pay_cb(1)
         elif eff == "cb_recall_amada":
             if self.cb_avail() >= 1 and not in_battle:                 # 「あなたのメインフェイズに」登場した時だけ
                 cands = [k for k in self.drop if k.name in ("無敗のボクサー 真田 明彦", "義理堅き忠犬 コロマル")
                          and all(not x or x.card.name != k.name for x in self.circles.values())]
                 spot = self.free_front()
-                if cands and spot:
+                if cands and spot and self.decide("cb_recall", c, True):
                     self.pay_cb(1); k = cands[0]; self.drop.remove(k); self.call(k, spot, "drop", opp)
         elif eff == "cb_discard_opp":
-            if opp and opp.hand and (a >= 3 or self.cb_avail() >= 2):
+            if opp and opp.hand and (a >= 3 or (self.cb_avail() >= 1 and self.decide("cb_discard_opp", c, self.cb_avail() >= 2))):
                 if a >= 3 or self.pay_cb(1):
                     opp.hand.remove(self.rng.choice(opp.hand)) if hasattr(opp, "prof") else opp.discard_one()
+                    self.L("  神木:相手の手札を1枚捨てさせた" + ("(太陽3つ:コストなし)" if a >= 3 else ""))
         elif eff == "sc1":
             self.sc(2 if a >= 3 and u.card.no in ("111", "115", "117") else 1)
             if a >= 3 and u.card.no == "062":
@@ -836,20 +842,27 @@ class PersonaPlayer:
                 else:
                     self.draw(1)
         elif eff == "cb_self_5000":
-            if a >= 3 or self.cb_avail() >= 2:
+            if a >= 3 or (self.cb_avail() >= 1 and self.decide("cb_self_5000", c, self.cb_avail() >= 2)):
                 if a >= 3 or self.pay_cb(1):
                     u.bonus += 5000
         elif eff == "maiko":
             if a >= 3:
                 if self.pay_cb(1):
                     u.end_hand = True; self.v_crit2 = True; self.L("舞子:ヴァンガードのクリティカル2")
-            elif self.cb_avail() >= 2:
+            elif self.cb_avail() >= 1 and self.decide("maiko", c, self.cb_avail() >= 2):
                 self.pay_cb(1); u.end_hand = True
         elif eff in ("eb1_lock",):
-            if opp and self.energy >= 3 and opp.rg_targets() and self.pay_eb(1):
+            if opp and self.energy >= 1 and opp.rg_targets() and self.decide("eb1_lock", c, self.energy >= 3) and self.pay_eb(1):
                 opp.lock_one()
                 if a >= 3 and u.card.no == "093":
                     self.ec(2)
+                # ベベ(節制3つ・ターン1回):さらにEB1で、ドロップのクリティカルトリガーを1枚山札に戻してシャッフル(2026/11/08 追加)
+                if a >= 3 and u.card.no == "099" and getattr(self, "bebe_turn", -1) != self.turn and self.energy >= 1:
+                    cr = [x for x in self.drop if x.kind == "trigger" and x.trig == "crit"]
+                    if cr and self.decide("bebe_crit", c, True) and self.pay_eb(1):
+                        self.bebe_turn = self.turn
+                        self.drop.remove(cr[0]); self.deck.append(cr[0]); self.rng.shuffle(self.deck)
+                        self.L("  ベベ:節制3つ、クリティカルを山札に戻す")
         elif eff == "kuma":
             ks = [k for k in self.drop if k.d["no"] == "119"]
             if ks and self.energy >= 3 and self.pay_eb(1):
@@ -883,16 +896,16 @@ class PersonaPlayer:
         elif eff == "ec2":
             self.ec(2)
         elif eff == "eb2_cc1":
-            if a >= 3 or self.pay_eb(2):
+            if a >= 3 or (self.energy >= 2 and self.decide("eb2_cc1", c, True) and self.pay_eb(2)):
                 self.cc(1)
         elif eff == "eb1_zero_retire":
             # 相手リアガードのシールドを0にし、相手のターン終了時に退却させる(相手の次のターンはまだアタックできる)
-            if opp and self.energy >= 3 and opp.rg_targets() and self.pay_eb(1):
+            if opp and self.energy >= 1 and opp.rg_targets() and self.decide("eb1_zero", c, self.energy >= 3) and self.pay_eb(1):
                 n = 2 if a >= 3 else 1
                 for _ in range(n):
                     opp.doom_one()
         elif eff == "eb3_retire":
-            if opp and self.energy >= 5 and self.pay_eb(3):
+            if opp and self.energy >= 3 and opp.rg_targets() and self.decide("eb3_retire", c, self.energy >= 5) and self.pay_eb(3):
                 opp.retire_one()
                 if a >= 3:
                     self.v_temp += 10000
@@ -904,7 +917,7 @@ class PersonaPlayer:
                 if self.is_g3(x): return 2_000_000 if need_g3 else -2_000_000      # ユニットの評価(1万台)より必ず大きく
                 if x.kind == "sentinel": return 1_000_000 if need_sent else -1_000_000
                 return self.unit_score(x)
-            k = self.look_top(7, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, csc)
+            k = self.look_top(7, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, csc, pick_kind="chie")
             if k:
                 self.hand.append(k)
                 if not (self.cb_avail() >= 2 and self.pay_cb(1)):
@@ -950,7 +963,7 @@ class PersonaPlayer:
                 self.ec(2 if (self.key == "P3P" and self.arcana["運命"] >= 3) else 1)
                 self.L("  綾時:ファルロスをバインドして死神+エネルギー")
         elif eff == "cb1_ec3":
-            if a >= 3 or (self.cb_avail() >= 2 and self.energy <= 6):
+            if a >= 3 or (self.cb_avail() >= 1 and self.decide("cb1_ec3", c, self.cb_avail() >= 2 and self.energy <= 6)):
                 if a >= 3 or self.pay_cb(1):
                     self.ec(3)
         elif eff == "draw_soul":
@@ -975,7 +988,7 @@ class PersonaPlayer:
                 if self.is_g3(x): return 2_000_000 if need_g3 else -2_000_000      # ユニットの評価(1万台)より必ず大きく
                 if x.kind == "sentinel": return 1_000_000 if need_sent else -1_000_000
                 return self.unit_score(x)
-            k = self.look_top(5, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, msc)
+            k = self.look_top(5, lambda x: "team" in x.tags and x.kind in ("unit", "sentinel") and x.name != name, msc, pick_kind="morgana")
             if k:
                 self.hand.append(k); self.discard_one("soul")
         elif eff == "takemi":
@@ -986,7 +999,7 @@ class PersonaPlayer:
                     k = max(cands, key=self.unit_score); self.drop.remove(k); self.call(k, spot, "drop", opp)
         elif eff == "togo":
             g2 = [(k, x) for k, x in self.circles.items() if x and x.card.grade == 2 and "team" in x.card.tags and x.card.kind == "unit"]
-            if g2:
+            if g2 and self.decide("togo", c, True):
                 k, x = min(g2, key=lambda kx: self.unit_score(kx[1].card))
                 tgt = self.search_deck(lambda c: c.grade == 2 and "team" in c.tags and c.kind == "unit" and c.name != x.card.name and not c.d["extra"].get("x"),
                                        lambda c: self.unit_score(c))
@@ -1005,7 +1018,7 @@ class PersonaPlayer:
                 for x in sorted(gs, key=lambda x: -x.card.power)[:n]:
                     x.bonus += 5000
         elif eff == "sae":
-            if self.cb_avail() >= 2:
+            if self.cb_avail() >= 1 and self.decide("sae", c, self.cb_avail() >= 2):
                 want_g3 = a >= 3 and not any(self.is_g3(h) for h in self.hand)
                 k = self.search_deck(lambda x: (self.is_g3(x) if want_g3 else x.no == "020"), lambda x: 0)
                 if k:
@@ -1030,6 +1043,8 @@ class PersonaPlayer:
     def unit_score(self, c):
         """前列アタッカーとしての評価"""
         s = c.power
+        if self.NAOTO_FOCUS and c.no == "041" and self.key == "P4" and self.arcana["運命"] < 3:
+            s += 8000                           # 直斗を意識:運命を3つ貯めて転生させる
         if c.persona:
             s += 6000
             if self.series == "P3" and c.name in self.awakened:
@@ -1151,6 +1166,7 @@ class PersonaPlayer:
             self.soul.append(self.vg)
             self.v_grade += 1
             self.vg = self.ride_line[self.v_grade]
+            self.rd_ride_turn = self.turn       # ライドデッキからライドしたターン(純黒の影は闇に蠢くのコスト判定)
             self.L(f"ライド G{self.v_grade}(コスト:{self.short(disc) if disc else 'なし'})")
             if self.v_grade == 1:
                 if not first:
@@ -1195,7 +1211,7 @@ class PersonaPlayer:
                 self.hand.remove(kw[0]); self.call(kw[0], spot, "hand", o)
         # G3の【起】1:CB1で2体コール
         low_deck = len(self.deck) <= self.DECK_SAFE and o.damage < 4      # 山札が少ない時は山札を減らす起動を控える(山札切れ対策)
-        if g >= 3 and not low_deck and self.pay_cb(max(0, 1 - self.cb_discount)):
+        if g >= 3 and self.cb_avail() >= max(0, 1 - self.cb_discount) and self.decide("act1", self.vg, not low_deck) and self.pay_cb(max(0, 1 - self.cb_discount)):
             self.cb_discount = 0
             self.act1_turn = self.turn
             self.act1(o)
@@ -1209,6 +1225,7 @@ class PersonaPlayer:
     def main_phase(self, o):
         g = self.v_grade
         self.marie_persona()
+        self.regalis(o)
         self.main_calls(o)
         # P3:覚醒
         if self.series == "P3" and g >= 3 and o.v_grade >= 3 and getattr(self, "awaken_turn", -1) != self.turn:     # S.E.E.S.の【起】【ターン1回】
@@ -1238,9 +1255,9 @@ class PersonaPlayer:
         if g >= 2 and self.eliz_soul_turn != self.turn and self.USE_ESOUL:
             el = [c for c in self.hand if c.d["extra"].get("elizabeth")]
             keep_for_bc = self.key in ("P3", "P3P") and (self.circles["BC"] is None or not self.circles["BC"].card.d["extra"].get("elizabeth"))
-            if el and not (keep_for_bc and len(el) == 1) and len(self.hand) >= 4:
-                facedown = len(self.dmg_zone) - self.cb_avail()
-                if self.energy <= 7 or facedown >= 1:
+            facedown = len(self.dmg_zone) - self.cb_avail()
+            if el and self.decide("eliz_soul", el[0], not (keep_for_bc and len(el) == 1) and len(self.hand) >= 4 and (self.energy <= 7 or facedown >= 1)):
+                if True:
                     self.hand.remove(el[0]); self.soul.append(el[0]); self.eliz_soul_turn = self.turn
                     if self.energy <= 7 and not (self.ESOUL_CC_FIRST and facedown >= 1):
                         self.ec(3); self.L("エリザベスをソウルへ:エネルギーチャージ3")
@@ -1265,12 +1282,85 @@ class PersonaPlayer:
             if not spot:
                 continue
             kind, n = ex
-            if kind == "EB" and self.energy >= n + 2 and self.pay_eb(n):
+            if kind == "EB" and self.energy >= n and self.decide("drop_call_eb", c, self.energy >= n + 2) and self.pay_eb(n):
                 self.drop.remove(c); self.call(c, spot, "drop", o)
-            elif kind == "CB" and self.cb_avail() >= 1 and self.pay_cb(1):
+            elif kind == "CB" and self.cb_avail() >= 1 and self.decide("drop_call_cb", c, True) and self.pay_cb(1):
                 self.drop.remove(c); self.call(c, spot, "drop", o)
                 if self.deck:
                     self.soul.append(self.deck.pop())
+
+    # ---- 自己学習の差し込み口(2026/11/08):払うかどうか選べるコストや、何を選ぶか。環境変数 LEARN_MAIN でモデルを使う
+    def decide(self, kind, card=None, default=True, extra=None):
+        if LEARN_MAIN is None:
+            return default
+        import learn_main
+        sf = learn_main.state_features(self)
+        X = [sf + learn_main.option_features(self, kind, card, yes, extra) for yes in (False, True)]
+        pr = LEARN_MAIN(X)
+        return pr[1] > pr[0]
+
+    def choose_card(self, kind, cands, default):
+        if LEARN_MAIN is None:
+            return default
+        import learn_main
+        sf = learn_main.state_features(self)
+        uniq = list({c.name: c for c in cands}.values())
+        pr = LEARN_MAIN([sf + learn_main.option_features(self, kind, c, True) for c in uniq])
+        return uniq[max(range(len(uniq)), key=lambda i: pr[i])]
+
+    def regalis(self, o):
+        """純黒の影は闇に蠢く(レガリスピース・ファイト中1回):このターンにライドデッキからライドしていなければコストなし(それ以外はCB1)。
+        ドロップから、グレード合計がヴァンガード以下になるように守護者以外のノーマルユニットを2枚までコール。1枚以下ならソウルへ"""
+        if getattr(self, "regalis_used", False):
+            return
+        rp = [c for c in self.hand if c.kind == "order" and c.d["extra"].get("regalis")]
+        if not rp or self.v_grade < 3:
+            return
+        free = getattr(self, "rd_ride_turn", -1) != self.turn
+        if not free and self.cb_avail() < 1:
+            return
+        spots = [k for k in ("FL", "FR") if self.circles[k] is None] + [k for k in ("BC", "BL", "BR") if self.circles[k] is None]
+        pool = [c for c in self.drop if c.kind == "unit" and not self.is_g3(c) and c.grade >= 1]
+        best, bs = None, -1
+        for i, a in enumerate(pool):
+            for b in [None] + pool[i + 1:]:
+                pick = [a] + ([b] if b else [])
+                if sum(x.grade for x in pick) > self.v_grade or len({x.name for x in pick}) < len(pick):
+                    continue
+                sc = sum(self.unit_score(x) for x in pick) + (100000 if len(pick) == 2 else 0)
+                if sc > bs:
+                    best, bs = pick, sc
+        if not best or not self.decide("regalis", rp[0], len(best) == 2 and (free or o.damage >= 4), extra=(len(best), sum(self.unit_score(x) for x in best) / 10000, 1.0 if free else 0.0)):
+            return
+        if len(spots) < len(best):      # 空きが足りなければ、弱いリアガードの上からコール(エリザベスのBCは残す)
+            occ = [(k, u) for k, u in self.circles.items() if u and k not in spots
+                   and not (k == "BC" and u.card.d["extra"].get("elizabeth"))]
+            occ.sort(key=lambda kv: self.unit_score(kv[1].card) + (8000 if kv[1].gauge else 0))
+            low = min(self.unit_score(x) for x in best)
+            for k, u in occ:
+                if len(spots) >= len(best):
+                    break
+                if self.unit_score(u.card) + (8000 if u.gauge else 0) < low:
+                    spots.append(k)
+            if len(spots) < len(best):
+                return
+        if not free:
+            self.pay_cb(1)
+        c0 = rp[0]
+        self.hand.remove(c0); self.regalis_used = True
+        self.drop.append(c0)
+        self.L("純黒の影は闇に蠢く:" + ("コストなし" if free else "CB1"))
+        if len(best) <= 1:
+            self.drop.remove(c0); self.soul.append(c0)      # 1枚以下ならソウルへ
+        best.sort(key=self.unit_score, reverse=True)
+        fronts = [k for k in spots if k in ("FL", "FR")]
+        rest = [k for k in spots if k not in fronts]
+        for x in best:
+            if x not in self.drop:          # 1枚目の登場時の効果などでドロップから動いていたら飛ばす
+                continue
+            k = fronts.pop(0) if fronts else rest.pop(0)
+            self.drop.remove(x)
+            self.call(x, k, "drop", o)
 
     def act1(self, o):
         top = self.deck[-7:]
@@ -1425,7 +1515,7 @@ class PersonaPlayer:
             if ex == "persona_bonus" and self.persona_this_turn:
                 pw += 5000
             if kind == "EB":
-                ok = self.energy >= n + (0 if pushing else 2)
+                ok = self.energy >= n + (0 if (pushing or (self.NAOTO_FOCUS and ex == "crit")) else 2)
                 spare = self.energy - n
             elif kind == "SB":
                 ok = len(self.soul) >= n + (0 if pushing else 1)
@@ -1447,10 +1537,12 @@ class PersonaPlayer:
             if not ok:
                 continue
             val = pw + (3000 if ex in ("crit", "retire") else 0) + (2000 if ex == "CC1" else 0)
+            if self.NAOTO_FOCUS and ex == "crit":
+                val += 20000                    # 直斗を意識:転生したらクリティカル+1のスキルを最優先
             if ex == "ec_grade":
                 val = 1500 * self.v_grade if self.energy <= 4 else 2000
             elif ex == "recarm":
-                val = 7000
+                val = RECARM_VAL
             elif ex == "tarunda":
                 base = {0: 6000, 1: 8000, 2: 10000, 3: 13000}[opp.v_grade]
                 val = max(0, base - 8000) * 2
@@ -1466,6 +1558,10 @@ class PersonaPlayer:
         if best is None:
             return
         _, kind, n, pw, ex = best
+        # 自己学習の差し込み口:このアタックでスキルを使うか(資源を温存するか)
+        if kind in ("EB", "SB") and not self.decide("skill_use", u.card, True,
+                extra=(pw / 10000, (atk.power - opp.vg_power()) / 10000, n if kind == "EB" else -n)):
+            return
         if kind == "EB":
             self.pay_eb(n)
         elif kind == "SB":
@@ -1674,7 +1770,8 @@ class PersonaPlayer:
             if res is not None:
                 return res
             # ファルロス:P3をブーストしたバトル終了時、ソウルに置いて1枚引く
-            if boosted and circ[b] and circ[b].card.no == "010" and self.series == "P3" and len(self.hand) <= 6 and len(self.deck) > self.DECK_SAFE:
+            if boosted and circ[b] and circ[b].card.no == "010" and self.series == "P3" and len(self.deck) > self.DECK_SAFE \
+                    and self.decide("boost_soul", circ[b].card, len(self.hand) <= 6):
                 self.soul.append(circ[b].card); circ[b] = None; self.draw(1)
                 self.L("  ファルロス:ソウルに置いて1枚引く")
             # 早瀬(星3つ):ヴァンガードのアタック終了時 SC1/EC1
@@ -1806,10 +1903,11 @@ class PersonaPlayer:
                 self.drop.append(u.card); self.circles[k] = None; self.draw(1); self.ec(1)
                 self.L("  明智:退却→1ドロー、EC1")
                 continue
-            if ex.get("end_soul_draw") and u.attacks and self.works(u.card) and len(self.hand) <= 6:
+            if ex.get("end_soul_draw") and u.attacks and self.works(u.card) and self.decide("end_soul", u.card, len(self.hand) <= 6):
                 self.soul.append(u.card); self.circles[k] = None
-                self.L(f"  {self.short(u.card)}:ソウルへ→{'EC2' if self.energy <= 4 else '1ドロー'}")
-                if self.energy <= 4:
+                ec2 = self.decide("end_soul_ec", u.card, self.energy <= 4)
+                self.L(f"  {self.short(u.card)}:ソウルへ→{'EC2' if ec2 else '1ドロー'}")
+                if ec2:
                     self.ec(2)
                 else:
                     self.draw(1)
@@ -1978,15 +2076,15 @@ class PersonaPlayer:
             u = self.circles[k]
             if u and (u.card.grade == 2 or ("velvet" in u.card.tags or "kyoryoku" in u.card.tags) and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) and not u.locked and not u.doomed and not getattr(self, "no_intercept", False) \
                     and not getattr(atk, "sweep", False):   # 前列すべてとバトル:アタックされている前列のリアガードはインターセプトできない
-                items.append(("I", k, 5000, 34 if u.gauge else 22, 0))
+                items.append(("I", k, 5000, IC_GAUGE if u.gauge else IC_PLAIN, 0))
         for k in ("BL", "BR", "BC"):
             if getattr(self, "no_intercept", False):
                 break
             u = self.circles[k]
             if u and ("kyoryoku" in u.card.tags or "velvet" in u.card.tags and "komyu" in u.card.tags) and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1 and not u.doomed:
-                items.append(("I", k, 5000, 18, 0))
+                items.append(("I", k, 5000, IC_BACK, 0))
             elif self.bc_intercept_ok(k, u):
-                items.append(("I", k, 5000, 34 if u.gauge else 22, 0))
+                items.append(("I", k, 5000, IC_GAUGE if u.gauge else IC_PLAIN, 0))
         return items
 
     @staticmethod
@@ -2125,6 +2223,13 @@ class PersonaPlayer:
 
 
 # =============================================================== 対戦
+# 試験用のつまみ(2026/11/09):インターセプトの「失う価値」(手札1枚≒30)と、リカームの評価
+IC_PLAIN = int(os.environ.get("IC_PLAIN", 12)); IC_GAUGE = int(os.environ.get("IC_GAUGE", 20)); IC_BACK = int(os.environ.get("IC_BACK", 10))   # 11/09:積極的にインターセプトする方が勝率が上がったので下げた(元は22・34・18)
+RECARM_VAL = int(os.environ.get("RECARM_VAL", 7000))
+LEARN_MAIN = None
+if os.environ.get("LEARN_MAIN"):
+    import learn_model as _lm2
+    LEARN_MAIN = _lm2.load_fast(os.environ["LEARN_MAIN"])
 LEARN_PRED = None
 if os.environ.get("LEARN_GUARD"):
     import learn_model as _lm
