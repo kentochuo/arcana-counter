@@ -56,6 +56,15 @@ def state_features(p, atk):
     return f
 
 
+META_NAMES = ["ヴァルガ", "エスタシオン", "レザエル", "ゼーリス", "ルブナ", "セラス", "アルフレッド"]
+
+
+def opp_extras(p):
+    """2026/11/10:相手が環境デッキならその種類(末尾に足す。古いモデルは見ない)"""
+    nm = getattr(p.opp, "name", "") if getattr(p, "opp", None) is not None else ""
+    return [1.0 if nm == k else 0.0 for k in META_NAMES]
+
+
 def option_features(p, atk, items, opt):
     need0 = atk.power - p.vg_power() + 1
     kind = opt[0]
@@ -80,7 +89,7 @@ def option_features(p, atk, items, opt):
         hit = 1.0
     return [1.0 if kind == "take" else 0.0, 1.0 if kind == "guard" else 0.0, 1.0 if kind == "sentinel" else 0.0,
             hand_used, ic, shield / 10000, trig, unit_used, over, margin, hit,
-            len(p.hand) - hand_used, p.damage + (atk.crit if hit else 0)]
+            len(p.hand) - hand_used, p.damage + (atk.crit if hit else 0)] + opp_extras(p)
 
 
 

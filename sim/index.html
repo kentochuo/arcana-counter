@@ -322,9 +322,11 @@ button.pile .zv::after{content:" ›";font-size:.6em;color:var(--gold)}
 <section class="screen" id="start">
  <div class="in">
   <div class="logo"><small>PERSONA 30th × VANGUARD</small><h1>ペルソナ<br>対戦練習</h1><span class="tag2"><span>PRACTICE FIGHT</span></span></div>
-  <p>自分のデッキを操作して、AIと対戦します。デッキはシミュレーターで探した最新のレシピです。</p>
+  <p>自分のデッキを操作して、AIと対戦します。デッキはシミュレーターで探した最新のレシピ(v4.15:☆7〜8枚・フロント0枚)です。相手は主流の形も選べます。</p>
   <div class="grp"><span class="lab">自分のデッキ</span><div class="decks" id="sMe"></div></div>
   <div class="grp"><span class="lab">相手のデッキ(AI)</span><div class="decks" id="sOpp"></div></div>
+  <div class="grp" id="gVar"><span class="lab">相手の構築</span><div class="seg" id="sVar"></div>
+    <p class="hint" id="varHint"></p></div>
   <div class="grp"><span class="lab">先攻・後攻</span><div class="seg" id="sFirst"></div></div>
   <div class="grp"><span class="lab">相手AIの強さ</span><div class="seg" id="sAi"></div>
     <p class="hint" id="aiHint"></p></div>
@@ -383,7 +385,7 @@ fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
 let TT = {};
 fetch("tokentext.json").then(r => r.json()).then(j => TT = j).catch(() => {});
 const TEAMTOK = {P3:"T51", P3P:"T51", P4:"T52", P5:"T53"};
-let st = {me:"P5", opp:"P3", first:"rand", ai:"learn", game:null, showAI:true};
+let st = {me:"P5", opp:"P3", oppVar:"", first:"rand", ai:"learn", game:null, showAI:true};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
 if (st.ai === "strong") st.ai = "search";
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
@@ -416,19 +418,31 @@ function seg(el, items, cur, on, deckAttr) {
 }
 function renderStart() {
   seg($("sMe"), DECKS.map(d => [d, d]), st.me, v => { st.me = v; save(); renderStart(); }, true);
-  seg($("sOpp"), DECKS.map(d => [d, d]), st.opp, v => { st.opp = v; save(); renderStart(); }, true);
+  seg($("sOpp"), DECKS.map(d => [d, d]), st.opp, v => { st.opp = v; st.oppVar = ""; save(); renderStart(); }, true);
+  // 相手の構築(限定構築戦の練習用:主流の形も相手にできる)
+  const VARS = {P5:[["","探索版"],["keiken","主流の形"],["ann","杏・東郷型"]], P3P:[["","探索版"],["keiken","主流の形"]]}[st.opp];
+  $("gVar").hidden = !VARS;
+  if (VARS) {
+    if (!VARS.some(v => v[0] === st.oppVar)) st.oppVar = "";
+    seg($("sVar"), VARS, st.oppVar, v => { st.oppVar = v; save(); renderStart(); });
+    $("varHint").textContent = {
+      "": "シミュレーターで探したレシピ(☆7〜8枚・フロント0枚)です。",
+      keiken: st.opp === "P5" ? "経験者のリスト:武見4・東郷4・杏4・モルガナ4・純黒の影は闇に蠢く1、☆7枚。" : "経験者のリスト:ゆかり4・アイギス3・美鶴4・純黒の影は闇に蠢く1、☆7枚。",
+      ann: "杏3・モルガナ3・東郷3・武見4・春2・冴1、☆7枚の形です。",
+    }[st.oppVar] || "";
+  }
   seg($("sFirst"), [["first","先攻"],["second","後攻"],["rand","ランダム"]], st.first, v => { st.first = v; save(); renderStart(); });
   seg($("sAi"), [["normal","ふつう"],["learn","強い(学習)"],["search","最強(先読み)"]], st.ai, v => { st.ai = v; save(); renderStart(); });
   $("aiHint").textContent = {
     normal: "いつもの判断(シミュレーターで調整した基準)で、すぐに動きます。",
-    learn: "自己対戦360万場面から学んだ「この盤面でこのガードなら何%勝てるか」でガードを選びます。ふつうより約6ポイント強く、すぐに動きます。",
+    learn: "自己対戦から学んだ判断でガードを選びます。相手のヴァンガードのアタックを「ちょうどの枚数」では止めず、トリガーは相手のガードを見てから乗せ先を決めます。すぐに動きます。",
     search: "ダメージが大きくなる場面のガードで、候補ごとに試合の続きを何十回も試して一番勝てる手を選びます。考えるのに数秒かかることがあります。",
   }[st.ai] || "";
   $("bResume").hidden = !(st.game && !st.game.over);
 }
 function newGame() {
   const first = st.first === "rand" ? Math.random() < .5 : st.first === "first";
-  st.game = {cfg:{me:st.me, opp:st.opp, seed:Math.floor(Math.random() * 1e9), first, ai:st.ai}, answers:[], cache:[], over:false};
+  st.game = {cfg:{me:st.me, opp:st.opp, opp_var:(st.oppVar || undefined), seed:Math.floor(Math.random() * 1e9), first, ai:st.ai}, answers:[], cache:[], over:false};
   save(); openGame();
 }
 $("bStart").onclick = newGame;

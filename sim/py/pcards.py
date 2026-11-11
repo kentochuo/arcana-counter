@@ -242,3 +242,13 @@ def works_in(cdef, deck_key):
 
 # 他の弾のカード(2026/11/08):レガリスピースのノーマルオーダー(DZ-SS10/019)。デッキに1枚、ファイト中1回
 card("R19", "純黒の影は闇に蠢く", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": True})
+# 国家表記のないレガリスピース(ペルソナ限定構築戦で使える。デッキに合計1枚・ファイト中1回。2026/11/11 公式カードリストのテキストで追加)
+card("R13", "恩寵湛えし聖なる杯", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": "grail"})        # ライドしていないターンにペルソナライドを発動
+card("R01", "燦爛たる光明の宝剣", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": "sword"})        # 2枚引く / ソウルに置いてCC1
+card("R15", "その輝きは遠く空の彼方より", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": "ladder"})  # 1枚引く、ソウルへ、V+5000、リアガードが選ばれない
+card("R55", "煌結晶", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": "crystal"})                 # 手札/ドロップから除外:山札5枚からVのグレード以下をコール、なければ1枚引く
+card("R14", "双つに連なる守護の法陣", 2, kind="order", power=0, shield=0, series="any", extra={"regalis": "twin", "blitz": True})    # +10000、ドロップから除外してグレード×5000
+card("R07", "天へと導く絆の翼", 2, kind="order", power=0, shield=0, series="any", extra={"regalis": "wing", "blitz": True})        # CB1かEB3:1枚引く、V+15000(同名バインドで+25000)
+card("R18", "艱難遮る碧の結界", 3, kind="order", power=0, shield=0, series="any", extra={"regalis": "barrier", "blitz": True})     # SB1:+25000
+card("R09", "潮騒響くは大いなる蒼海", 2, kind="order", power=0, shield=0, series="any", extra={"regalis": "tide", "blitz": True})   # +15000、相手1体-5000(ペルソナライドしていれば-10000)
+REGALIS = ("R19", "R13", "R01", "R15", "R55", "R14", "R07", "R18", "R09")

@@ -15,6 +15,29 @@ from pengine import PersonaPlayer, Attack, short_name, EX_JP
 from pcards import C, GAUGES, VG_GAUGES
 from precipes_final import FINAL
 
+# 練習用のレシピの別版(2026/11/11 ペルソナ限定構築戦に向けて)。cfg["me_var"] / cfg["opp_var"] で選ぶ
+VARIANTS = {
+    ("P5", "keiken"): {"017": 3, "019": 4, "020": 4, "048": 4, "052": 2, "021": 4, "022": 4, "024": 4, "074": 4, "R19": 1,
+                       "028": 1, "054": 4, "080": 4, "128": 1, "129": 1, "130": 1, "132": 4},
+    ("P5", "ann"): {"017": 3, "023": 1, "024": 4, "028": 1, "074": 4, "054": 4, "080": 4, "128": 3, "132": 4, "020": 4, "019": 3, "048": 3,
+                    "052": 2, "051": 2, "022": 3, "021": 4, "076": 1},
+    ("P3P", "keiken"): {"005": 3, "003": 1, "006": 4, "008": 3, "029": 3, "030": 4, "010": 4, "024": 4, "060": 4, "099": 3, "R19": 1,
+                        "025": 1, "035": 4, "065": 4, "103": 1, "104": 1, "105": 1, "107": 4},
+}
+
+
+# メインフェイズの学習モデル(相手AIの動きと、こちらへのおすすめに使う。numpyなしの読み込み)
+try:
+    import os as _os, pengine as _pe, learn_model as _lmm
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "learn_main_r6.json")
+    if _os.path.exists(_p) and _pe.LEARN_MAIN is None:
+        _pe.LEARN_MAIN = _lmm.load(_p)
+except Exception as _e:      # 読めなければ、手書きのルールで動かす
+    pass
+
+def recipe_of(key, var=None):
+    return VARIANTS.get((key, var)) or FINAL[key]
+
 
 class NeedInput(Exception):
     def __init__(self, q):
@@ -1112,18 +1135,30 @@ class HumanPlayer(PersonaPlayer):
             if o["id"] == cur:
                 o["sub"] = "今アタック中"
         rem = [x for x in ("FL", "V", "FR", "BC") if x in getattr(self, "_trig_rem", [])]
-        now = self.opp.damage >= 4 or not rem
         nxt = rem[0] if rem else None
-        if "クリティカル+1" in title:
-            tgt = cur if (now or self.opp.damage >= 3 or nxt is None) else nxt
+        atk = getattr(self, "_trig_atk", None)
+        crit = "クリティカル+1" in title
+        if atk is None or nxt is None:
+            tgt, why = cur, "今のアタックに乗せます(最後のアタック)"
         else:
-            tgt = cur if (now or nxt is None) else nxt
-        why = ("今のアタックに乗せます" + ("(相手が4点以上・最後のアタック)" if now else "(相手が3点以上なのでクリティカルは今)")) if tgt == cur else f"まだアタックしていない{self.NMS.get(tgt, tgt)}に乗せて、次のアタックを通しやすくします"
+            g = atk.guard
+            gap = None if g == "perfect" else self.opp.vg_power() + g - atk.power
+            if g == "perfect":
+                tgt, why = nxt, "完全ガードされたので、まだアタックしていないユニットに回します"
+            elif gap <= 0:
+                tgt, why = (cur, "このアタックはもう当たるので、クリティカルは今のアタックに乗せます") if crit else (nxt, "このアタックはもう当たるので、パワーは次のアタックに回します")
+            elif gap <= 10000:
+                tgt, why = cur, "あと+10000でガードを貫通するので、今のアタックに乗せます"
+            elif gap <= 20000 and atk.dleft >= 2 and self.opp.damage >= 4:
+                tgt, why = cur, "あと2枚で貫通。相手が4点以上でドライブが2回残っているので、今のアタックに賭けます"
+            else:
+                tgt, why = nxt, "このアタックはガードを貫通できないので、まだアタックしていないユニットに回します"
         self.hint(([tgt], why))
         return self.ask("trigger", title, opts)
 
     def apply_trigger(self, opp, c, atk, remaining, pend, plan, idx):
         self._trig_rem = [s0 for s0, _ in remaining]
+        self._trig_atk = atk
         t = c.trig
         cur = getattr(self, "cur_spot", "V")
 
@@ -1401,6 +1436,11 @@ class AIPlayer(PersonaPlayer):
         opts, default = learn_ai.guard_options(self, atk, items, need)
         if len(opts) <= 1:
             return default[0], list(default[1])
+        if self.NO_EXACT_V and atk.is_v and atk.drives >= self.NO_EXACT_V and len(opts) > 2:
+            _c, _gs = self.knap(items, atk.power - self.vg_power() + 1)
+            _o2 = [o for o in opts if o != ("guard", tuple(sorted(_gs or [])))]
+            if 2 <= len(_o2) < len(opts):
+                opts = _o2
         sf = learn_ai.state_features(self, atk)
         pr = guard_model()([sf + learn_ai.option_features(self, atk, items, o) for o in opts])
         pick = opts[max(range(len(opts)), key=lambda i: pr[i])]
@@ -1466,9 +1506,9 @@ def guard_model():
 def rollout(cfg, answers, script, seed):
     """先読みの試行:人の答えとAIの判断(script)の通りに最初からやり直し、その先はAI同士で最後まで。AIが勝てば1"""
     rng = random.Random(cfg["seed"])
-    me = HumanPlayer(cfg["me"], FINAL[cfg["me"]], rng, None, list(answers))
+    me = HumanPlayer(cfg["me"], recipe_of(cfg["me"], cfg.get("me_var")), rng, None, list(answers))
     me.autopilot_ok = True
-    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, None, script=script)
+    ai = AIPlayer(cfg["opp"], recipe_of(cfg["opp"], cfg.get("opp_var")), rng, None, script=script)
     ai.r_seed = seed * 7919 + 13
     me.opp, ai.opp = ai, me
     players = [me, ai] if cfg["first"] else [ai, me]
@@ -1546,8 +1586,8 @@ def run(cfg, answers, cache=None):
     rng = random.Random(cfg["seed"])
     log = []
     cache = [e for e in (cache or []) if e["qi"] <= len(answers)]      # 1手戻した時:それより後の判断は捨てる
-    me = HumanPlayer(cfg["me"], FINAL[cfg["me"]], rng, log, list(answers))
-    ai = AIPlayer(cfg["opp"], FINAL[cfg["opp"]], rng, log, strong={"strong": "search", "search": "search", "learn": "learn"}.get(cfg.get("ai"), False), cache=cache, ctx=(cfg, list(answers)))
+    me = HumanPlayer(cfg["me"], recipe_of(cfg["me"], cfg.get("me_var")), rng, log, list(answers))
+    ai = AIPlayer(cfg["opp"], recipe_of(cfg["opp"], cfg.get("opp_var")), rng, log, strong={"strong": "search", "search": "search", "learn": "learn"}.get(cfg.get("ai"), False), cache=cache, ctx=(cfg, list(answers)))
     me.opp, ai.opp = ai, me
     players = [me, ai] if cfg["first"] else [ai, me]
     state = dict(winner=None, turn_no=0)

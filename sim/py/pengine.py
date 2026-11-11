@@ -80,12 +80,36 @@ EX_JP = {"": "", "CC1": "カウンターチャージ1", "crit": "クリティカ
 
 
 class Attack:
-    __slots__ = ("power", "crit", "drives", "is_v", "restrict", "crit_ability", "second", "attacker", "sweep")
+    __slots__ = ("power", "crit", "drives", "is_v", "restrict", "crit_ability", "second", "attacker", "sweep", "nosent", "guard", "dleft")
 
     def __init__(self, power, crit, drives, is_v, restrict=False, crit_ability=False, second=False, attacker=None):
         self.power, self.crit, self.drives, self.is_v = power, crit, drives, is_v
         self.restrict, self.crit_ability, self.second, self.attacker = restrict, crit_ability, second, attacker
         self.sweep = False
+        self.nosent = False     # 守護者をコールできない(アルファルド“幻影”など)
+        self.guard = 0          # このアタックに相手が出したガード値("perfect" なら完全ガード)。トリガーの振り分けに使う
+        self.dleft = 0          # 残りのドライブチェックの回数
+
+
+def trig_to_self(atk, opp, has_next, old_now):
+    """トリガーのパワー/☆を、今アタックしているユニットに乗せるか(True)、次にアタックするユニットに回すか(False)。
+    相手のガードを見てから決める(2026/11/10 総点検):
+    - 完全ガードされた → 全部次へ / すでにヒットする → パワーは次へ、☆は自分 / あと1枚でヒット → 自分
+    - あと2枚必要 → 相手4点以上でドライブが2回以上残っていれば賭ける、それ以外は次へ"""
+    if not has_next:
+        return True, True
+    g = atk.guard
+    if g == "perfect":
+        return False, False
+    gap = opp.vg_power() + g - atk.power
+    if gap <= 0:
+        return False, True
+    n = -(-gap // 10000)
+    if n == 1:
+        return True, True
+    if n == 2 and atk.dleft >= 2 and old_now:
+        return True, True
+    return False, False
 
 
 # =============================================================== 相手(プロファイル型)
@@ -199,6 +223,15 @@ class ProfilePlayer:
 
     def retire_front(self, i):
         self.front[i] = None
+
+    def rg_value(self, i):
+        return 30 if self.front[i] else 0
+
+    def defend_rg(self, i, atk, attacker):
+        if not self.front[i] or atk.power < self.front[i][0].power:
+            return True
+        self.front[i] = None           # 簡易モデルはリアガードを守らない
+        return False
 
     # ---- ターン
     def take_turn(self, o, first, game):
@@ -496,7 +529,19 @@ class PersonaPlayer:
     DECK_SAFE = 10                                     # 山札がこの枚数以下なら、G3の【起】1(山札から2体コール)や任意のドローを控える
     NAOTO_FOCUS = os.environ.get("NAOTO_FOCUS") == "1"  # 直斗を意識したプレイ(2026/11/08):運命を貯めて転生、メギドラオン優先
     GEN_DRAW_MIN = 7                                   # エネルギージェネレーター【起】(ターン1回 EB7で1枚引く)を使うエネルギー量(自分のターン終了前)
-    def __init__(self, deck_key, recipe, rng, log=None):
+    # ---- 2026/11/10 総点検で追加したつまみ
+    ATTACK_ORDER = "RVR"                               # アタックの順番 RVR:リア→ヴァンガード→リア(従来) / VRR:ヴァンガードから / RRV:ヴァンガードを最後
+    RG_ATK = 1                                         # リアガードへのアタック 0:しない 1:ヴァンガードに届かない時だけ 2:価値の高いリアガードも狙う
+    RG_ATK_DMG = 2                                     # (RG_ATK=2)相手のダメージがこの点数以下の時に狙う
+    RG_ATK_VAL = 45                                    # (RG_ATK=2)この価値以上のリアガードを狙う(手札1枚≒30)
+    RG_GUARD_K = 0.75                                  # 自分のリアガードがアタックされた時、ガードの損がユニットの価値×この値より小さければ守る
+    NO_EXACT_V = 1                                     # ドライブがこの回数以上のヴァンガードのアタックを、ちょうどの枚数ではガードしない(0で無効)
+    TRIG_SMART = 1                                     # 1: 相手のガードを見てからトリガーの振り分けを決める(2026/11/10)
+    MULL_SENT = 1                                      # マリガンで残す守護者の枚数
+    MULL_UNITS = 9                                     # マリガンで残すG1/G2ユニットの上限
+    MULL_HEAL = 0                                      # マリガンで残すヒールトリガーの枚数
+    FRONT_SWAP = 6000                                  # 前列を上書きコールする時、今のユニットよりこの値以上強ければ入れ替える
+    def __init__(self, deck_key, recipe, rng, log=None, attrs=None):
         """recipe: {カード番号: 枚数} 山札50枚(トリガー込み)"""
         self.key, self.rng, self.log = deck_key, rng, log
         for k, v in TUNE.get(deck_key, {}).items():
@@ -508,6 +553,8 @@ class PersonaPlayer:
                 v = {int(a): tuple(b) for a, b in v.items()}
             elif k == "EARLY_G1_SECOND" and v is not None:
                 v = tuple(v)
+            setattr(self, k, v)
+        for k, v in (attrs or {}).items():       # 試験用:プレイ方針のつまみを上書き(ab_test.py)
             setattr(self, k, v)
         self.series = "P3" if deck_key in ("P3", "P3P") else deck_key
         self.deck = []
@@ -656,14 +703,16 @@ class PersonaPlayer:
         return c.d["no"] == self.g3_no
 
     def mulligan(self):
-        keep, back, g3k, sk = [], [], 0, 0
-        for c in self.hand:
-            if c.kind == "unit" and c.grade in (1, 2) and not self.is_g3(c):
-                keep.append(c)
+        keep, back, g3k, sk, uk, hk = [], [], 0, 0, 0, 0
+        for c in sorted(self.hand, key=lambda c: -self.unit_score(c) if c.kind == "unit" else 0):
+            if c.kind == "unit" and c.grade in (1, 2) and not self.is_g3(c) and uk < self.MULL_UNITS:
+                keep.append(c); uk += 1
             elif self.is_g3(c) and g3k < self.KEEP_G3:
                 keep.append(c); g3k += 1
-            elif c.kind == "sentinel" and sk < 1:
+            elif c.kind == "sentinel" and sk < self.MULL_SENT:
                 keep.append(c); sk += 1
+            elif c.kind == "trigger" and c.trig == "heal" and hk < self.MULL_HEAL:
+                keep.append(c); hk += 1
             else:
                 back.append(c)
         self.hand = keep
@@ -674,7 +723,7 @@ class PersonaPlayer:
     def card_value(self, c):
         """手札から捨てる/ソウルに置く時の価値(低いほど先に手放す)"""
         if c.kind == "sentinel": return 100
-        if c.kind == "order": return 88
+        if c.kind == "order": return 1 if getattr(self, "regalis_used", False) else 88
         if self.is_g3(c):
             if sum(1 for k in self.hand if self.is_g3(k)) <= 1: return 95
             return 90 if getattr(self, "focus_th", False) and "メサイア" not in self.vgauge else 20
@@ -1308,12 +1357,58 @@ class PersonaPlayer:
         pr = LEARN_MAIN([sf + learn_main.option_features(self, kind, c, True) for c in uniq])
         return uniq[max(range(len(uniq)), key=lambda i: pr[i])]
 
+    def regalis_other(self, o):
+        """国家表記のないレガリスピースのうち、メインフェイズに使うもの(2026/11/11)。使ったら True"""
+        def use(c, where=None):
+            (where or self.hand).remove(c); self.regalis_used = True
+        # 煌結晶:手札かドロップから除外(プレイではないのでグレードの制限なし)
+        cr = next((c for c in self.hand + self.drop if c.d["extra"].get("regalis") == "crystal"), None)
+        if cr and self.v_grade >= 2 and len(self.deck) > 8:
+            spot = self.free_front() or self.free_back()
+            if spot:
+                use(cr, self.hand if cr in self.hand else self.drop); self.bind.append(cr)
+                top = [self.deck.pop() for _ in range(min(5, len(self.deck)))]
+                ok = [c for c in top if c.kind == "unit" and 1 <= c.grade <= self.v_grade and not self.is_g3(c)
+                      and (c.grade == 2 or spot not in ("FL", "FR"))]
+                pick = max(ok, key=self.unit_score) if ok else None
+                rest = [c for c in top if c is not pick]
+                self.deck.extend(rest); self.rng.shuffle(self.deck)
+                if pick:
+                    self.L("煌結晶:山札5枚から", self.short(pick), "をコール"); self.call(pick, spot, "deck", o)
+                else:
+                    self.draw(1); self.L("煌結晶:1枚引く")
+                return True
+        rp = [c for c in self.hand if c.kind == "order" and c.d["extra"].get("regalis") in ("grail", "sword", "ladder")]
+        if not rp or self.v_grade < 3:
+            return False
+        c = rp[0]; k = c.d["extra"]["regalis"]
+        if k == "grail":
+            # 恩寵湛えし聖なる杯:このターンにライドしていなければ、ペルソナライドを発動(1枚引く、前列+10000、ペルソナライドしたことになる)
+            if self.persona_this_turn or getattr(self, "rd_ride_turn", -1) == self.turn:
+                return False
+            use(c); self.drop.append(c)
+            self.draw(1); self.persona_this_turn = True; self.persona_ever = True
+            self.grail_turn = self.turn
+            self.L("恩寵湛えし聖なる杯:ペルソナライドを発動(1枚引く)")
+            return True
+        if k == "sword":
+            use(c); self.drop.append(c); self.draw(2); self.L("燦爛たる光明の宝剣:2枚引く")
+            return True
+        if k == "ladder":
+            use(c); self.soul.append(c); self.draw(1); self.v_temp += 5000
+            self.ladder_until = self.turn + 1          # 次の相手のターン終了時まで、リアガードは相手の効果で選べない
+            self.L("その輝きは遠く空の彼方より:1枚引く、ヴァンガード+5000")
+            return True
+        return False
+
     def regalis(self, o):
         """純黒の影は闇に蠢く(レガリスピース・ファイト中1回):このターンにライドデッキからライドしていなければコストなし(それ以外はCB1)。
         ドロップから、グレード合計がヴァンガード以下になるように守護者以外のノーマルユニットを2枚までコール。1枚以下ならソウルへ"""
         if getattr(self, "regalis_used", False):
             return
-        rp = [c for c in self.hand if c.kind == "order" and c.d["extra"].get("regalis")]
+        if self.regalis_other(o):
+            return
+        rp = [c for c in self.hand if c.kind == "order" and c.d["extra"].get("regalis") is True]
         if not rp or self.v_grade < 3:
             return
         free = getattr(self, "rd_ride_turn", -1) != self.turn
@@ -1427,7 +1522,7 @@ class PersonaPlayer:
                 continue
             best = max(cands, key=self.unit_score)
             cur = self.circles[spot]
-            if cur is None or (cur.rest and cur.locked) or (g >= 3 and self.unit_score(best) > self.unit_score(cur.card) + 6000):
+            if cur is None or (cur.rest and cur.locked) or (g >= 3 and self.unit_score(best) > self.unit_score(cur.card) + self.FRONT_SWAP):
                 if g <= 1 and o.damage >= self.G1_STOP_DMG:
                     continue
                 if cur is not None and cur.rest and cur.locked:
@@ -1691,6 +1786,10 @@ class PersonaPlayer:
         plan.append(("V", None if bc_attack else "BC"))
         if circ["FR"]: plan.append(("FR", "BR"))
         if bc_attack: plan.append(("BC", None))
+        if self.ATTACK_ORDER == "VRR":
+            plan.sort(key=lambda x: x[0] != "V")
+        elif self.ATTACK_ORDER == "RRV":
+            plan.sort(key=lambda x: x[0] == "V")
         # 竜司:相手リアガードを殴ってスタンド
         extra_attacks = []
         pend = {}
@@ -1748,6 +1847,19 @@ class PersonaPlayer:
                         plan.append((spot, None))
                     i += 1
                     continue
+                tgt = self.rg_attack_target(opp, atk.power + pend.get(spot, (0, 0))[0])
+                if tgt is not None:
+                    # リアガードへのアタック(スキルは使わない)
+                    u.attacks += 1; u.rest = True
+                    if b and circ[b] and boost(b):
+                        circ[b].rest = True
+                    atk.power += pend.get(spot, (0, 0))[0]; pend.pop(spot, None)
+                    nm = opp.rg_name(tgt) if hasattr(opp, "rg_name") else "リアガード"
+                    alive = opp.defend_rg(tgt, atk, self)
+                    self.L("アタック", u.card, atk.power, "→ 相手のリアガード", nm, "ガードされた" if alive else "退却させた")
+                    self.rg_atk_n = getattr(self, "rg_atk_n", 0) + 1
+                    i += 1
+                    continue
                 if spot == "BC" and u.card.d["extra"].get("elizabeth") and self.persona_this_turn and self.energy >= 2:
                     self.pay_eb(2); atk.power += 9999; atk.crit += 1; atk.crit_ability = True
                 else:
@@ -1785,8 +1897,10 @@ class PersonaPlayer:
 
     def resolve(self, opp, atk, remaining, pend, plan, idx):
         guarded = opp.defend(atk, self)
+        atk.guard = guarded
         self.L("アタック", "V" if atk.is_v else atk.attacker.card, atk.power, f"☆{atk.crit}", f"ドライブ{atk.drives}", "相手ガード", guarded, f"相手{opp.damage}点")
-        for _ in range(atk.drives):
+        for _dj in range(atk.drives):
+            atk.dleft = atk.drives - _dj - 1
             c = self.take_top()
             if c is None:
                 return opp
@@ -1820,6 +1934,10 @@ class PersonaPlayer:
         now = opp.damage >= 4 or not remaining
         nxt = remaining[0][0] if remaining else None
         t = c.trig
+        if self.TRIG_SMART:
+            ps, cs = trig_to_self(atk, opp, nxt is not None, opp.damage >= 4)
+        else:
+            ps, cs = (now or nxt is None), (now or opp.damage >= 3 or nxt is None)
         # 表示用:トリガーで上がったパワーをユニットに記録(そのターン中)
         def _disp(sp, v=10000):
             if sp == "V":
@@ -1831,7 +1949,7 @@ class PersonaPlayer:
             for sp in ("V", "FL", "FR"):
                 _disp(sp)
         elif t in ("crit", "draw", "heal"):
-            _disp(cur if (now or nxt is None) else nxt)
+            _disp(cur if ps else nxt)
         elif t == "over":
             _disp(cur, 100_000_000)
         if t == "front":
@@ -1852,12 +1970,12 @@ class PersonaPlayer:
                 self.draw(1)
                 self.over_call(opp)
         else:
-            if now or nxt is None:
+            if ps:
                 atk.power += 10000
             else:
                 p, k = pend.get(nxt, (0, 0)); pend[nxt] = (p + 10000, k)
             if t == "crit":
-                if now or opp.damage >= 3 or nxt is None:
+                if cs:
                     atk.crit += 1
                 else:
                     p, k = pend.get(nxt, (0, 0)); pend[nxt] = (p, k + 1)
@@ -1946,6 +2064,57 @@ class PersonaPlayer:
         if self.circles[k]:
             self.drop.append(self.circles[k].card); self.circles[k] = None
 
+    def rg_attack_target(self, opp, power):
+        """リアガードにアタックするなら、その相手前列の番号(しないなら None)"""
+        mode = self.RG_ATK
+        if not mode or not hasattr(opp, "defend_rg"):
+            return None
+        cands = [(i, pw) for i, pw in opp.rg_targets() if power >= pw]
+        if not cands:
+            return None
+        best = max(cands, key=lambda t: opp.rg_value(t[0]))
+        if power < opp.vg_power():
+            return best[0]
+        if mode >= 2 and opp.damage <= self.RG_ATK_DMG and opp.rg_value(best[0]) >= self.RG_ATK_VAL:
+            return best[0]
+        return None
+
+    def rg_name(self, i):
+        u = self.circles[("FL", "FR")[i]]
+        return self.short(u.card) if u else "-"
+
+    def rg_value(self, i):
+        """前列のリアガードの価値(手札1枚≒30)。ペルソナゲージ付きは高い"""
+        u = self.circles[("FL", "FR")[i]]
+        if not u:
+            return 0
+        v = 30
+        if u.gauge:
+            v += 20
+            if u.card.name in self.awakened or "flat" in GAUGES.get(u.gauge, {}):
+                v += 15
+        return v
+
+    def defend_rg(self, i, atk, attacker):
+        """自分の前列のリアガードがアタックされた。守れたら True、退却したら False"""
+        k = ("FL", "FR")[i]
+        u = self.circles[k]
+        if not u:
+            return True
+        need = atk.power - self.unit_power(u, attacker, k) + 1
+        if need <= 0:
+            return True
+        self._nosent = False
+        items = [it for it in self.guard_items(atk) if not (it[0] == "I" and it[1] == k)]
+        cost, gs = self.knap(items, need)
+        if gs is not None and cost < self.rg_value(i) * self.RG_GUARD_K and len(self.hand) - sum(1 for j in gs if items[j][0] == "H") >= 2:
+            self.gzone = []
+            self.apply_guard("guard", items, gs)
+            return True
+        self.L("  リアガード", self.short(u.card), "がアタックされて退却")
+        self.drop.append(u.card); self.circles[k] = None
+        return False
+
     def lock_one(self):
         """相手のリアガード1体:次の相手ターン終了時までインターセプトできず、スタンドフェイズにスタンドできない
         (レストしている前列を優先して選ぶ。スタンドしているユニットはインターセプトだけ封じられる)"""
@@ -2017,6 +2186,8 @@ class PersonaPlayer:
 
     def guard_cost(self, c):
         """ガードに使った時に失う価値(手札1枚≒30)"""
+        if c.kind == "order":      # レガリスピース:使う前は手放さない、使えなくなったら最初に捨てる
+            return 2 if getattr(self, "regalis_used", False) else 90
         if c.kind == "trigger":
             return 60 if c.trig == "over" else 28
         if self.is_g3(c):
@@ -2037,6 +2208,7 @@ class PersonaPlayer:
 
     def _defend(self, atk, attacker):
         self.gzone = []          # 表示用:このバトルでガーディアンサークルに置いたカード
+        self._nosent = getattr(atk, "nosent", False)
         defense = self.vg_power()
         if atk.power < defense:
             return 0
@@ -2061,8 +2233,26 @@ class PersonaPlayer:
     def guard_items(self, atk):
         """ガードに使えるもの: (種類, 対象, シールド, 失う価値, 追加コストの有無)"""
         items = []
+        if not getattr(self, "regalis_used", False):
+            for c in self.hand:
+                k = c.d["extra"].get("regalis") if c.kind == "order" and c.d["extra"].get("blitz") else None
+                if not k or not atk.is_v and k == "wing":
+                    continue
+                og = getattr(self, "opp", None).v_grade if getattr(self, "opp", None) else 3
+                if k == "twin" and self.v_grade >= 2:
+                    items.append(("H", c, 10000, 14, 0))
+                elif k == "wing" and self.v_grade >= 2 and (self.cb_avail() >= 1 or self.energy >= 3):
+                    same = any(x.name == self.vg.name for x in self.soul + self.drop)
+                    items.append(("H", c, 25000 if same else 15000, 10, 0))      # 1枚引くので失う価値は小さい
+                elif k == "barrier" and self.v_grade >= 3 and len(self.soul) >= 1:
+                    items.append(("H", c, 25000, 30, 0))
+                elif k == "tide" and (self.v_grade >= 2 or self.v_grade < og):
+                    items.append(("H", c, 15000, 26, 0))
+        tw = next((c for c in self.drop if c.d["extra"].get("regalis") == "twin"), None)
+        if tw:      # 双つに連なる守護の法陣:ドロップから除外して、アタックされているユニットのグレード×5000(レガリスピースを使った後でも可)
+            items.append(("H", tw, 5000 * max(1, self.v_grade), 2, 0))
         for c in self.hand:
-            if c.kind == "sentinel" or self.is_g3(c):
+            if c.kind == "sentinel" or self.is_g3(c) or c.kind == "order":
                 continue
             if c.kind == "trigger" and c.trig == "over":
                 items.append(("H", c, 50000, self.guard_cost(c), 0))
@@ -2107,6 +2297,8 @@ class PersonaPlayer:
 
     def sentinel_cost(self):
         INF = 10 ** 9
+        if getattr(self, "_nosent", False):
+            return INF
         sents = [c for c in self.hand if c.kind == "sentinel"]
         sent_cost = INF
         if sents and self.v_grade >= 1:
@@ -2140,6 +2332,13 @@ class PersonaPlayer:
             opts, default = learn_ai.guard_options(self, atk, items, need)
             if len(opts) <= 1:
                 return default[0], list(default[1])
+            if self.NO_EXACT_V and atk.is_v and atk.drives >= self.NO_EXACT_V and len(opts) > 2:
+                # ヴァンガードのアタックを「ちょうど止まる枚数」でガードしない(トリガー1枚で貫通されるため。2026/11/10 採用)
+                _c, _gs = self.knap(items, atk.power - self.vg_power() + 1)
+                _ex = ("guard", tuple(sorted(_gs or [])))
+                _o2 = [o for o in opts if o != _ex]
+                if len(_o2) >= 2 and len(_o2) < len(opts):
+                    opts = _o2
             sf = learn_ai.state_features(self, atk)
             pr = LEARN_PRED([sf + learn_ai.option_features(self, atk, items, o) for o in opts])
             pick = opts[max(range(len(opts)), key=lambda i: pr[i])]
@@ -2186,6 +2385,23 @@ class PersonaPlayer:
             total += it[2]
             if it[0] == "I":
                 self.drop.append(self.circles[it[1]].card); self.circles[it[1]] = None
+            elif it[1].kind == "order":
+                c = it[1]; k = c.d["extra"].get("regalis")
+                if c in self.drop:                    # 双つに連なる守護の法陣(ドロップから除外)
+                    self.drop.remove(c); self.bind.append(c)
+                    continue
+                self.hand.remove(c); self.regalis_used = True
+                if k == "wing":
+                    if self.energy >= 3: self.pay_eb(3)
+                    else: self.pay_cb(1)
+                    if it[2] >= 25000:
+                        x = next(x for x in self.soul + self.drop if x.name == self.vg.name)
+                        (self.soul if x in self.soul else self.drop).remove(x); self.bind.append(x)
+                    self.bind.append(c); self.draw(1)
+                else:
+                    if k == "barrier":
+                        self.pay_sb(1)
+                    self.drop.append(c)
             else:
                 c = it[1]
                 self.hand.remove(c)
@@ -2251,9 +2467,9 @@ class PGame:
             return ProfilePlayer(spec, self.rng, log)
         if spec[0] == "meta":
             import meta_engine
-            return meta_engine.make(spec[1], self.rng, log)
-        _, key, recipe = spec
-        return PersonaPlayer(key, recipe, self.rng, log)
+            return meta_engine.make(spec[1], self.rng, log, spec[2] if len(spec) > 2 else None)
+        key, recipe = spec[1], spec[2]
+        return PersonaPlayer(key, recipe, self.rng, log, spec[3] if len(spec) > 3 else None)
 
     def play(self, max_turns=30):
         for t in range(max_turns):
