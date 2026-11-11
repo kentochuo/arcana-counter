@@ -530,12 +530,16 @@ class PersonaPlayer:
     NAOTO_FOCUS = os.environ.get("NAOTO_FOCUS") == "1"  # 直斗を意識したプレイ(2026/11/08):運命を貯めて転生、メギドラオン優先
     GEN_DRAW_MIN = 7                                   # エネルギージェネレーター【起】(ターン1回 EB7で1枚引く)を使うエネルギー量(自分のターン終了前)
     # ---- 2026/11/10 総点検で追加したつまみ
+    ORDER_EARLY = ""                                   # G2までのターンのアタック順(""ならATTACK_ORDERと同じ)
     ATTACK_ORDER = "RVR"                               # アタックの順番 RVR:リア→ヴァンガード→リア(従来) / VRR:ヴァンガードから / RRV:ヴァンガードを最後
     RG_ATK = 1                                         # リアガードへのアタック 0:しない 1:ヴァンガードに届かない時だけ 2:価値の高いリアガードも狙う
     RG_ATK_DMG = 2                                     # (RG_ATK=2)相手のダメージがこの点数以下の時に狙う
     RG_ATK_VAL = 45                                    # (RG_ATK=2)この価値以上のリアガードを狙う(手札1枚≒30)
     RG_GUARD_K = 0.75                                  # 自分のリアガードがアタックされた時、ガードの損がユニットの価値×この値より小さければ守る
     NO_EXACT_V = 1                                     # ドライブがこの回数以上のヴァンガードのアタックを、ちょうどの枚数ではガードしない(0で無効)
+    ELIZ_RESERVE = 1                                   # 1: 相手4点以上でも、エリザベスのメギドラオン用にエネルギー2を残す(試験用)
+    RECARM_ATTACK = 2                                  # リカームで出したユニットはそのターンにアタックする。2: 相手がG2までのうちだけエネルギーの予備を残さず使う(1: いつでも優先、0: 旧動作=アタックしない)
+    RECARM_PLAN = 1                                    # 1: G2のターンにリカームを仕込む(G2をライドコストで捨て、前列を1つ空けて、ゆかりのリカームで出して殴る)
     TRIG_SMART = 1                                     # 1: 相手のガードを見てからトリガーの振り分けを決める(2026/11/10)
     MULL_SENT = 1                                      # マリガンで残す守護者の枚数
     MULL_UNITS = 9                                     # マリガンで残すG1/G2ユニットの上限
@@ -733,6 +737,13 @@ class PersonaPlayer:
         if c.d["no"] == "024" and self.key in ("P3", "P3P"): return 70
         if c.grade == 2: return 35
         return 30
+
+    def _has_recarm(self, c):
+        return bool(c.kind == "unit" and c.persona and any(sk[3] == "recarm" for sk in GAUGES[c.persona].get("skills", [])))
+
+    def decide_skip_pref(self, pref):
+        """ライドコストでエリザベス/イゴール(捨てるとサーチ)を捨てられるなら、そちらを優先する"""
+        return bool(pref and any(pref(c) for c in self.hand))
 
     def discard_one(self, to="drop", prefer=None):
         if not self.hand:
@@ -1203,6 +1214,14 @@ class PersonaPlayer:
                 if ex.get("discard_search") == "velvet":
                     return True
                 return False
+            if self.RECARM_PLAN and self.v_grade == 1 and any(self._has_recarm(c) for c in self.hand) and not self.decide_skip_pref(pref):
+                # リカームの仕込み:G2にライドするターン、ゆかりが手札にあれば、別名のチームのG2をコストで捨てる(ゆかりのリカームで前列に戻す)
+                yn = next(c.name for c in self.hand if self._has_recarm(c))
+                if not any("team" in k.tags and k.kind == "unit" and k.grade == 2 and k.name != yn for k in self.drop):
+                    _g2 = [c for c in self.hand if c.kind == "unit" and c.grade == 2 and "team" in c.tags and not self.is_g3(c) and c.name != yn and not self._has_recarm(c)]
+                    if len(_g2) >= 1 and len([c for c in self.hand if c.kind == "unit" and c.grade == 2 and not self.is_g3(c)]) >= 2:
+                        _d = max(_g2, key=self.unit_score)
+                        pref = lambda c, _d=_d: c is _d
             disc = self.discard_one("drop", prefer=pref)
             if disc is not None and disc.d["extra"].get("discard_search"):
                 kind = disc.d["extra"]["discard_search"]
@@ -1509,10 +1528,25 @@ class PersonaPlayer:
         fmax, bmax = self.EARLY.get(g, (2, 3))
         if g == 1 and not self.first and self.EARLY_G1_SECOND is not None:
             fmax, bmax = self.EARLY_G1_SECOND
+        # リカームの仕込み(RECARM_PLAN):G2のターン、ゆかりを前列に置いて反対側の前列を空け、アタック時のリカーム(EB2)でドロップのG2を出して殴る
+        plan_rc = False
+        if g == 2 and self.RECARM_PLAN and self.energy >= 2:
+            tg = lambda who: any("team" in k.tags and k.kind == "unit" and k.grade <= 2 and not self.is_g3(k) and k.name != who for k in self.drop)
+            emp = [k for k in ("FL", "FR") if self.circles[k] is None]
+            fy = next((self.circles[k] for k in ("FL", "FR") if self.circles[k] and self._has_recarm(self.circles[k].card) and self.circles[k].gauge), None)
+            hy = next((c for c in self.hand if self._has_recarm(c)), None)
+            if fy and emp and tg(fy.card.name):
+                plan_rc = True
+            elif hy and len(emp) == 2 and tg(hy.name):
+                self.hand.remove(hy); self.call(hy, "FL", "hand", o); plan_rc = True
+            if plan_rc:
+                self.L("  リカームの仕込み:前列を1つ空けておく")
         # 前列
         for spot in ("FL", "FR"):
             if len(self.hand) <= reserve:
                 break
+            if plan_rc and self.circles[spot] is None:
+                continue
             if g < 3 and self.circles[spot] is None and sum(1 for k in ("FL", "FR") if self.circles[k]) >= fmax:
                 continue
             cands = units()
@@ -1610,7 +1644,7 @@ class PersonaPlayer:
             if ex == "persona_bonus" and self.persona_this_turn:
                 pw += 5000
             if kind == "EB":
-                ok = self.energy >= n + (0 if (pushing or (self.NAOTO_FOCUS and ex == "crit")) else 2)
+                ok = self.energy >= n + (0 if ((pushing and not self.eliz_reserve()) or (self.NAOTO_FOCUS and ex == "crit")) else 2)
                 spare = self.energy - n
             elif kind == "SB":
                 ok = len(self.soul) >= n + (0 if pushing else 1)
@@ -1627,6 +1661,9 @@ class PersonaPlayer:
                 continue
             if ex == "recarm" and not self._recarm_target():
                 continue
+            if ex == "recarm" and self.energy >= n and not self.eliz_reserve() and (
+                    self.RECARM_ATTACK == 1 or (self.RECARM_ATTACK == 2 and opp.v_grade <= 2)):
+                ok = True                       # 2: 相手がG2までのうち(出したユニットのアタックが届く)だけ、エネルギーの予備を残さず使う
             if ex == "hamaon" and (self.v_grade < 3 or not opp.low_grade_rg()):
                 continue
             if not ok:
@@ -1637,7 +1674,7 @@ class PersonaPlayer:
             if ex == "ec_grade":
                 val = 1500 * self.v_grade if self.energy <= 4 else 2000
             elif ex == "recarm":
-                val = RECARM_VAL
+                val = 16000 if (self.RECARM_ATTACK == 1 or (self.RECARM_ATTACK == 2 and opp.v_grade <= 2)) else RECARM_VAL
             elif ex == "tarunda":
                 base = {0: 6000, 1: 8000, 2: 10000, 3: 13000}[opp.v_grade]
                 val = max(0, base - 8000) * 2
@@ -1679,6 +1716,7 @@ class PersonaPlayer:
         elif ex == "recarm":
             k, spot = self._recarm_target()
             self.drop.remove(k); self.call(k, spot, "drop", opp, in_battle=True)
+            self.recarm_spot = spot              # battle() が、このユニットのアタックを順番の最後に足す(RECARM_ATTACK)
         if ex == "crit":
             atk.crit += 1; atk.crit_ability = True
         elif ex == "CC1":
@@ -1703,7 +1741,10 @@ class PersonaPlayer:
 
     def _recarm_target(self):
         """リカーム:ドロップから別名のチームのユニット(守護者以外)を、空いている(R)にコール"""
-        spot = self.free_front() or self.free_back()
+        spot = self.free_front()
+        if not spot and self.RECARM_ATTACK and self.circles["BC"] is None and self.v_grade >= 3 and self.act1_turn == self.turn:
+            spot = "BC"
+        spot = spot or self.free_back()
         if not spot:
             return None
         names = {u.card.name for u in self.units()}
@@ -1712,6 +1753,13 @@ class PersonaPlayer:
         if not ks:
             return None
         return max(ks, key=self.unit_score), spot
+
+    def eliz_reserve(self):
+        """ペルソナライドしたターンで、中央後列のエリザベスがまだアタックしていないなら、メギドラオン用のエネルギー2を残す(ELIZ_RESERVE=1の時)"""
+        if not self.ELIZ_RESERVE or not self.persona_this_turn:
+            return False
+        u = self.circles.get("BC")
+        return bool(u and not u.rest and u.card.d["extra"].get("elizabeth"))
 
     def use_vg_skill(self, opp, atk, remaining):
         """ヴァンガードのアタック時、ペルソナゲージの〔スキル〕を1つ使う"""
@@ -1723,7 +1771,7 @@ class PersonaPlayer:
         for gname in self.vgauge:
             for kind, n, pw, ex in VG_GAUGES[gname]["skills"]:
                 if kind == "EB":
-                    ok = self.energy >= n + (0 if pushing else 2); spare = self.energy - n
+                    ok = self.energy >= n + (0 if (pushing and not self.eliz_reserve()) else 2); spare = self.energy - n
                 else:
                     ok = len(self.soul) >= n + (0 if pushing else 1); spare = len(self.soul) * 2 - n
                 if not ok:
@@ -1786,10 +1834,16 @@ class PersonaPlayer:
         plan.append(("V", None if bc_attack else "BC"))
         if circ["FR"]: plan.append(("FR", "BR"))
         if bc_attack: plan.append(("BC", None))
-        if self.ATTACK_ORDER == "VRR":
+        _ord = self.ATTACK_ORDER
+        if g < 3 and self.ORDER_EARLY:          # G2までのターンだけ別の順番(試験用)
+            _ord = self.ORDER_EARLY
+        if _ord == "VRR":
             plan.sort(key=lambda x: x[0] != "V")
-        elif self.ATTACK_ORDER == "RRV":
+        elif _ord == "RRV":
             plan.sort(key=lambda x: x[0] == "V")
+        elif _ord == "RVL":                     # 右→ヴァンガード→左(試験用)
+            pr = {"FR": 0, "V": 1, "FL": 2, "BC": 3}
+            plan.sort(key=lambda x: pr[x[0]])
         # 竜司:相手リアガードを殴ってスタンド
         extra_attacks = []
         pend = {}
@@ -1835,6 +1889,7 @@ class PersonaPlayer:
                 if u.card.d["extra"].get("ryuji") and self.works(u.card) and u.attacks == 0 and g >= 3 \
                         and opp.rg_targets() and len(self.soul) >= 1:
                     self.use_skill(u, opp, atk)
+                    self.recarm_spot = None
                     idx, rp = max(opp.rg_targets(), key=lambda t: t[1])
                     u.attacks += 1
                     if atk.power >= rp:
@@ -1864,6 +1919,16 @@ class PersonaPlayer:
                     self.pay_eb(2); atk.power += 9999; atk.crit += 1; atk.crit_ability = True
                 else:
                     self.use_skill(u, opp, atk)
+                    _rs = getattr(self, "recarm_spot", None)
+                    if _rs and self.RECARM_ATTACK:
+                        self.recarm_spot = None
+                        _ru = circ.get(_rs)
+                        if _ru and not _ru.rest and all(p0[0] != _rs for p0 in plan[i + 1:]):
+                            if _rs in ("FL", "FR"):
+                                plan.append((_rs, "BL" if _rs == "FL" else "BR"))
+                            elif _rs == "BC" and g >= 3 and self.act1_turn == self.turn and "team" in _ru.card.tags:
+                                plan.append(("BC", None))        # G3の【起】を使ったターン:中央後列のチームのユニットは後列からアタックできる
+                        remaining = plan[i + 1:]
                 u.attacks += 1
                 atk.second = u.attacks >= 2
             atk.power += pend.get(spot, (0, 0))[0]

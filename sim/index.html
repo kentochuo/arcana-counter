@@ -325,6 +325,8 @@ button.pile .zv::after{content:" ›";font-size:.6em;color:var(--gold)}
   <p>自分のデッキを操作して、AIと対戦します。デッキはシミュレーターで探した最新のレシピ(v4.15:☆7〜8枚・フロント0枚)です。相手は主流の形も選べます。</p>
   <div class="grp"><span class="lab">自分のデッキ</span><div class="decks" id="sMe"></div></div>
   <div class="grp"><span class="lab">相手のデッキ(AI)</span><div class="decks" id="sOpp"></div></div>
+  <div class="grp" id="gMyVar"><span class="lab">自分の構築</span><div class="seg" id="sMyVar"></div>
+    <p class="hint" id="myVarHint"></p></div>
   <div class="grp" id="gVar"><span class="lab">相手の構築</span><div class="seg" id="sVar"></div>
     <p class="hint" id="varHint"></p></div>
   <div class="grp"><span class="lab">先攻・後攻</span><div class="seg" id="sFirst"></div></div>
@@ -385,7 +387,7 @@ fetch("tokens.json").then(r => r.json()).then(j => TOK = j).catch(() => {});
 let TT = {};
 fetch("tokentext.json").then(r => r.json()).then(j => TT = j).catch(() => {});
 const TEAMTOK = {P3:"T51", P3P:"T51", P4:"T52", P5:"T53"};
-let st = {me:"P5", opp:"P3", oppVar:"", first:"rand", ai:"learn", game:null, showAI:true};
+let st = {me:"P5", opp:"P3", meVar:"", oppVar:"", first:"rand", ai:"learn", game:null, showAI:true};
 try { const s = JSON.parse(localStorage.getItem(LS) || "null"); if (s) st = Object.assign(st, s); } catch(e) {}
 if (st.ai === "strong") st.ai = "search";
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch(e) {} };
@@ -420,7 +422,14 @@ function renderStart() {
   seg($("sMe"), DECKS.map(d => [d, d]), st.me, v => { st.me = v; save(); renderStart(); }, true);
   seg($("sOpp"), DECKS.map(d => [d, d]), st.opp, v => { st.opp = v; st.oppVar = ""; save(); renderStart(); }, true);
   // 相手の構築(限定構築戦の練習用:主流の形も相手にできる)
-  const VARS = {P5:[["","探索版"],["keiken","主流の形"],["ann","杏・東郷型"]], P3P:[["","探索版"],["keiken","主流の形"]]}[st.opp];
+  const MYV = {P3P:[["","通常(v4.15)"],["limited","限定構築戦用"]]}[st.me];
+  $("gMyVar").hidden = !MYV;
+  if (MYV) {
+    if (!MYV.some(v => v[0] === st.meVar)) st.meVar = "";
+    seg($("sMyVar"), MYV, st.meVar, v => { st.meVar = v; save(); renderStart(); });
+    $("myVarHint").textContent = st.meVar === "limited" ? "アイギス2・ベベ2・イゴール1・双つに連なる守護の法陣1の形。双つに連なる守護の法陣は、ガードで+10000、そのあとドロップから除外してもう一度+15000に使えます。" : "シミュレーターで探したレシピ(☆7枚・フロント0枚)です。";
+  } else st.meVar = "";
+  const VARS = {P5:[["","探索版"],["keiken","主流の形"],["ann","杏・東郷型"]], P3P:[["","探索版"],["keiken","主流の形"],["limited","限定構築戦用"]]}[st.opp];
   $("gVar").hidden = !VARS;
   if (VARS) {
     if (!VARS.some(v => v[0] === st.oppVar)) st.oppVar = "";
@@ -429,6 +438,7 @@ function renderStart() {
       "": "シミュレーターで探したレシピ(☆7〜8枚・フロント0枚)です。",
       keiken: st.opp === "P5" ? "経験者のリスト:武見4・東郷4・杏4・モルガナ4・純黒の影は闇に蠢く1、☆7枚。" : "経験者のリスト:ゆかり4・アイギス3・美鶴4・純黒の影は闇に蠢く1、☆7枚。",
       ann: "杏3・モルガナ3・東郷3・武見4・春2・冴1、☆7枚の形です。",
+      limited: "アイギス2・ベベ2・イゴール1・双つに連なる守護の法陣1の形です(同型の練習用)。",
     }[st.oppVar] || "";
   }
   seg($("sFirst"), [["first","先攻"],["second","後攻"],["rand","ランダム"]], st.first, v => { st.first = v; save(); renderStart(); });
@@ -442,7 +452,7 @@ function renderStart() {
 }
 function newGame() {
   const first = st.first === "rand" ? Math.random() < .5 : st.first === "first";
-  st.game = {cfg:{me:st.me, opp:st.opp, opp_var:(st.oppVar || undefined), seed:Math.floor(Math.random() * 1e9), first, ai:st.ai}, answers:[], cache:[], over:false};
+  st.game = {cfg:{me:st.me, me_var:(st.meVar || undefined), opp:st.opp, opp_var:(st.oppVar || undefined), seed:Math.floor(Math.random() * 1e9), first, ai:st.ai}, answers:[], cache:[], over:false};
   save(); openGame();
 }
 $("bStart").onclick = newGame;

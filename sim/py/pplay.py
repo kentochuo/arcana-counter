@@ -16,7 +16,9 @@ from pcards import C, GAUGES, VG_GAUGES
 from precipes_final import FINAL
 
 # 練習用のレシピの別版(2026/11/11 ペルソナ限定構築戦に向けて)。cfg["me_var"] / cfg["opp_var"] で選ぶ
+from precipes_final import LIMITED
 VARIANTS = {
+    ("P3P", "limited"): LIMITED["P3P"], ("P3", "limited"): LIMITED["P3"],
     ("P5", "keiken"): {"017": 3, "019": 4, "020": 4, "048": 4, "052": 2, "021": 4, "022": 4, "024": 4, "074": 4, "R19": 1,
                        "028": 1, "054": 4, "080": 4, "128": 1, "129": 1, "130": 1, "132": 4},
     ("P5", "ann"): {"017": 3, "023": 1, "024": 4, "028": 1, "074": 4, "054": 4, "080": 4, "128": 3, "132": 4, "020": 4, "019": 3, "048": 3,
@@ -1260,6 +1262,8 @@ class HumanPlayer(PersonaPlayer):
                 i = next((i for i, c in enumerate(self.hand) if c is it[1]), None)
                 if i is not None:
                     ids.append(f"H{i}")
+                elif it[1] in self.drop:
+                    ids.append("D0")
             else:
                 ids.append(f"I{it[1]}")
         mg = tot - need0
@@ -1294,6 +1298,16 @@ class HumanPlayer(PersonaPlayer):
                 free = self.arcana[self.arc(c)] >= 2
                 opts.append(dict(id=f"S{i}", label=cname(c), no=c.d["no"], sub="守護者:完全ガード" + ("(コストなし)" if free else "(手札1枚捨て)")))
                 continue
+            if c.kind == "order":
+                # ブリッツオーダーのレガリスピース(国家表記なし):双つに連なる守護の法陣 / 艱難遮る碧の結界
+                k = c.d["extra"].get("regalis") if c.d["extra"].get("blitz") else None
+                if getattr(self, "regalis_used", False):
+                    continue
+                if k == "twin" and self.v_grade >= 2:
+                    items.append((f"H{i}", c, 10000, 0)); opts.append(dict(id=f"H{i}", label=cname(c), no=c.d["no"], sub="ブリッツオーダー:+10000(使った後、ドロップから除外してもう一度使える)"))
+                elif k == "barrier" and self.v_grade >= 3 and len(self.soul) >= 1:
+                    items.append((f"H{i}", c, 25000, 1)); opts.append(dict(id=f"H{i}", label=cname(c), no=c.d["no"], sub="ブリッツオーダー:SB1で+25000"))
+                continue
             if c.kind == "trigger" and c.trig == "over":
                 items.append((f"H{i}", c, 50000, 0)); opts.append(dict(id=f"H{i}", label=cname(c), no=c.d["no"], sub="シールド50000")); continue
             base, boost = self.guard_value(c, atk)
@@ -1303,6 +1317,10 @@ class HumanPlayer(PersonaPlayer):
             sh = base + (boost if can_boost else 0)
             items.append((f"H{i}", c, sh, 1 if can_boost else 0))
             opts.append(dict(id=f"H{i}", label=cname(c), no=c.d["no"], sub=f"シールド{sh}" + ("(SB1かEB2)" if can_boost else "")))
+        _tw = next((c for c in self.drop if c.d["extra"].get("regalis") == "twin"), None)
+        if _tw:
+            _sh = 5000 * max(1, self.v_grade)
+            items.append(("D0", _tw, _sh, 0)); opts.append(dict(id="D0", label=cname(_tw) + "(ドロップから)", no=_tw.d["no"], sub=f"ドロップから除外:+{_sh}(コストなし)"))
         for k in ("FL", "FR"):
             u = self.circles[k]
             if u and (u.card.grade == 2 or ("velvet" in u.card.tags or "kyoryoku" in u.card.tags) and "komyu" in u.card.tags and self.works(u.card) and self.arcana[self.arc(u.card)] >= 1) \
@@ -1356,14 +1374,19 @@ class HumanPlayer(PersonaPlayer):
             total += it[2]
             if it[0].startswith("I"):
                 self.drop.append(self.circles[it[1]].card); self.circles[it[1]] = None
+        for it in chosen:
+            if it[0] == "D0":
+                self.drop.remove(it[1]); self.bind.append(it[1])
         for c in hand_cards:
             it = next(x for x in chosen if x[1] is c)
             self.hand.remove(c)
+            if c.kind == "order":
+                self.regalis_used = True
             (self.soul if c.d["no"] in ("036", "045", "055") else self.drop).append(c)
             if it[3]:
                 if not self.pay_sb(1):
                     self.pay_eb(2)
-            if c.kind == "trigger" and c.d["extra"]["guard"][2] == "ec1":
+            if c.kind == "trigger" and c.d["extra"]["guard"] and c.d["extra"]["guard"][2] == "ec1":
                 self.ec(1)
         return total
 
